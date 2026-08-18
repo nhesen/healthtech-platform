@@ -1,0 +1,32 @@
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import { router } from "expo-router";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { AppButton } from "@/components/AppButton";
+import { Card } from "@/components/Card";
+import { PageHeader } from "@/components/PageHeader";
+import { Screen } from "@/components/Screen";
+import { ErrorState, LoadingState } from "@/components/States";
+import { TrendChart } from "@/components/TrendChart";
+import { colors, radius, spacing } from "@/constants/theme";
+import { useApi } from "@/hooks/useApi";
+import { PATIENT_ID, api } from "@/services/api";
+import type { AIExplanation, Notification, Overview, TrendsResponse } from "@/types/api";
+
+export default function Home() {
+  const state = useApi(async () => { const [overview, trends, insight, notifications] = await Promise.all([api<Overview>(`/patients/${PATIENT_ID}/overview`), api<TrendsResponse>(`/patients/${PATIENT_ID}/trends`), api<AIExplanation>(`/ai/lab-explanation/${PATIENT_ID}`), api<Notification[]>("/notifications")]); return { overview, trends, insight, notifications }; }, [], 10000);
+  if (state.loading && !state.data) return <Screen><LoadingState/></Screen>;
+  if (state.error && !state.data) return <Screen><ErrorState message={state.error} retry={state.reload}/></Screen>;
+  const data = state.data!; const hba = data.trends.trends.find(x => x.metric === "HbA1c"); const upcoming = data.overview.upcoming_appointment; const unread = data.notifications.filter(x => !x.read_at).length;
+  return <Screen refreshing={state.loading} onRefresh={state.reload}>
+    <PageHeader title="Good evening, Hasan" subtitle="Here is your health overview" action={{ icon: "bell-outline", badge: unread, onPress: () => router.push("/notifications") }}/>
+    <View style={styles.statusGrid}><Card style={styles.statusCard}><Text style={styles.label}>Health Status</Text><View style={styles.statusLine}><View style={styles.dot}/><Text style={styles.stable}>Stable</Text></View></Card><Card style={styles.statusCard}><Text style={styles.label}>New Insights</Text><Text style={styles.big}>{data.overview.insight_count}</Text></Card></View>
+    <Card title="Insurance"><Text style={styles.cardLead}>{data.overview.patient.insurance_plan}</Text><Text style={styles.muted}>Active · Endocrinology coverage available</Text></Card>
+    <Card title="Next Appointment"><Text style={styles.cardLead}>{upcoming?.doctor_name ?? "No upcoming appointment"}</Text><Text style={styles.muted}>{upcoming ? new Date(upcoming.starts_at).toLocaleString() : "Find a specialist when you are ready."}</Text></Card>
+    {hba ? <Card eyebrow="HEALTH TREND" title="HbA1c"><Text style={styles.metric}>{hba.current}<Text style={styles.unit}>%</Text></Text><Text style={styles.rise}>↑ {hba.change} since previous · {hba.trend}</Text><TrendChart points={hba.history}/></Card> : null}
+    <Card eyebrow="AI INSIGHT" title={data.insight.ai.content.title}><Text style={styles.body}>{data.insight.ai.content.explanation}</Text><Text style={styles.actionText}>{data.insight.ai.content.suggested_action}</Text><AppButton label="Find Specialist" onPress={() => router.push("/(tabs)/doctors")}/></Card>
+    <Text style={styles.section}>Quick Actions</Text><View style={styles.quickGrid}><Quick icon="file-upload-outline" label="Upload Lab" onPress={() => router.push("/documents/upload")}/><Quick icon="shield-check-outline" label="Data Access" onPress={() => router.push("/permissions")}/><Quick icon="calculator-variant-outline" label="Insurance" onPress={() => router.push("/insurance")}/><Quick icon="clipboard-pulse-outline" label="Daily Check-in" onPress={() => router.push("/post-discharge")}/></View>
+    <Text style={styles.section}>Recent Activity</Text>{data.overview.recent_activity.map((item, index) => <Card key={`${item.title}-${index}`}><Text style={styles.cardLead}>{item.title}</Text><Text style={styles.muted}>{item.record_date} · {item.type.replaceAll("_", " ")}</Text></Card>)}
+  </Screen>;
+}
+function Quick({ icon, label, onPress }: { icon: keyof typeof MaterialCommunityIcons.glyphMap; label: string; onPress: () => void }) { return <Pressable onPress={onPress} style={styles.quick}><View style={styles.quickIcon}><MaterialCommunityIcons name={icon} color={colors.primary} size={23}/></View><Text style={styles.quickLabel}>{label}</Text></Pressable>; }
+const styles = StyleSheet.create({ statusGrid: { flexDirection: "row", gap: spacing.md }, statusCard: { flex: 1 }, label: { color: colors.secondary, fontSize: 12, fontWeight: "700" }, statusLine: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 7 }, dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.success }, stable: { color: colors.success, fontSize: 20, fontWeight: "900" }, big: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 5 }, cardLead: { color: colors.text, fontSize: 16, fontWeight: "800" }, muted: { color: colors.secondary, marginTop: 5, lineHeight: 19 }, metric: { color: colors.text, fontSize: 42, fontWeight: "900" }, unit: { fontSize: 22 }, rise: { color: colors.warning, fontWeight: "700", marginBottom: 5 }, body: { color: colors.secondary, lineHeight: 21 }, actionText: { color: colors.primaryDark, fontWeight: "800", marginVertical: spacing.md }, section: { color: colors.text, fontSize: 19, fontWeight: "900", marginTop: spacing.sm }, quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md }, quick: { width: "47.8%", minHeight: 92, padding: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.card, justifyContent: "space-between" }, quickIcon: { width: 38, height: 38, backgroundColor: colors.primaryLight, borderRadius: 12, alignItems: "center", justifyContent: "center" }, quickLabel: { color: colors.text, fontWeight: "800" } });

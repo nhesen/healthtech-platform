@@ -83,6 +83,7 @@ def test_post_discharge_alert_notification_and_safety_deduplication():
     low={"pain_score":2,"temperature":36.7,"medication_taken":True,"symptoms":"","notes":"ok"}; high={"pain_score":7,"temperature":38.2,"medication_taken":False,"symptoms":"fever","notes":"worse"}
     c.post("/post-discharge/patient_hasan",headers=PATIENT,json=low)
     assert c.post("/post-discharge/patient_hasan",headers=PATIENT,json=high).json()["requires_review"] is True
+    history=c.get("/post-discharge/patient_hasan",headers=PATIENT).json(); assert len(history)==2 and history[0]["pain_score"]==7
     assert any(n["type"]=="WARNING" for n in c.get("/notifications",headers=DOCTOR).json())
     event={"room_id":"204","event_type":"FALL_RISK","severity":"HIGH","confidence":.91,"patient_state":"STANDING","previous_state":"SITTING"}
     first=c.post("/cv-events",headers=ADMIN,json=event).json(); second=c.post("/cv-events",headers=ADMIN,json=event).json()

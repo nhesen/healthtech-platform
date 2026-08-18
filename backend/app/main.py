@@ -250,7 +250,7 @@ async def lifespan(_:FastAPI):
     yield
 
 app=FastAPI(title="HealthTech Backbone",version="0.1.0",lifespan=lifespan)
-app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:3000").split(",") if x.strip()],allow_methods=["GET","POST","PATCH","OPTIONS"],allow_headers=["Authorization","Content-Type","X-Demo-User","X-CV-Service-Key"])
+app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:3000,http://localhost:8081").split(",") if x.strip()],allow_methods=["GET","POST","PATCH","OPTIONS"],allow_headers=["Authorization","Content-Type","X-Demo-User","X-CV-Service-Key"])
 @app.middleware("http")
 async def security_headers(request,call_next):
     response=await call_next(request)
@@ -445,7 +445,7 @@ def book(payload:AppointmentIn,user:DemoUser=Depends(require("PATIENT"))):
 @app.get("/appointments")
 def list_appointments(user:DemoUser=Depends(current_user)):
     with db() as conn:
-        if user.role=="PATIENT": q="SELECT a.*,u.name doctor_name,s.starts_at FROM appointments a JOIN patients p ON p.id=a.patient_id JOIN users u ON u.id=(SELECT user_id FROM doctors WHERE id=a.doctor_id) JOIN availability s ON s.id=a.slot_id WHERE p.user_id=?"; data=rows(conn.execute(q,(user.id,)).fetchall())
+        if user.role=="PATIENT": q="SELECT a.*,u.name doctor_name,d.specialty,h.name hospital_name,s.starts_at FROM appointments a JOIN patients p ON p.id=a.patient_id JOIN doctors d ON d.id=a.doctor_id JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id JOIN availability s ON s.id=a.slot_id WHERE p.user_id=?"; data=rows(conn.execute(q,(user.id,)).fetchall())
         elif user.role=="DOCTOR": data=rows(conn.execute("SELECT a.id,a.patient_id,a.doctor_id,a.slot_id,a.status,a.reason,a.created_at,u.name patient_name,s.starts_at FROM appointments a JOIN doctors d ON d.id=a.doctor_id JOIN patients p ON p.id=a.patient_id JOIN users u ON u.id=p.user_id JOIN availability s ON s.id=a.slot_id WHERE d.user_id=?",(user.id,)).fetchall())
         else: data=rows(conn.execute("SELECT a.id,a.patient_id,a.doctor_id,a.slot_id,a.status,a.created_at FROM appointments a JOIN doctors d ON d.id=a.doctor_id WHERE d.hospital_id=?",(hospital_scope(conn,user),)).fetchall())
         return data
@@ -626,6 +626,11 @@ def complete_cleaning(bed_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN")
         enforce_hospital(conn,user,bed["hospital_id"])
         if bed["status"]!="CLEANING": raise HTTPException(409,"Only cleaning beds can become available")
         conn.execute("UPDATE beds SET status='AVAILABLE' WHERE id=?",(bed_id,)); audit(conn,user.id,"BED_CLEANING_COMPLETED","bed",bed_id); return {"bed_id":bed_id,"status":"AVAILABLE"}
+@app.get("/post-discharge/{patient_id}")
+def checkin_history(patient_id:str,user:DemoUser=Depends(require("PATIENT"))):
+    with db() as conn:
+        clinical_access(conn,patient_id,user)
+        return rows(conn.execute("SELECT id,checkin_date,pain_score,temperature,medication_taken,symptoms,notes FROM checkins WHERE patient_id=? ORDER BY checkin_date DESC,rowid DESC",(patient_id,)).fetchall())
 @app.post("/post-discharge/{patient_id}",status_code=201)
 def checkin(patient_id:str,payload:CheckinIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:

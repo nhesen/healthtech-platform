@@ -8,8 +8,12 @@ __pycache__/
 *.pyc
 frontend/node_modules/
 frontend/.next/
+apps/patient-mobile/node_modules/
+apps/patient-mobile/.expo/
+apps/patient-mobile/dist/
 .env*
 !.env.example
+!apps/patient-mobile/.env.example
 venv/
 *.pt
 *.onnx

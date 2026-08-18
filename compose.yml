@@ -5,7 +5,7 @@ services:
     environment:
       DATABASE_URL: sqlite:////data/healthtech.db
       DEMO_MODE: ${DEMO_MODE:-true}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8081}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-}

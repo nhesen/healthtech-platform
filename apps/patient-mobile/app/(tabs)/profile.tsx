@@ -1,0 +1,18 @@
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import { router } from "expo-router";
+import { StyleSheet, Text, View } from "react-native";
+import { AppButton } from "@/components/AppButton";
+import { Card } from "@/components/Card";
+import { ListRow } from "@/components/ListRow";
+import { PageHeader } from "@/components/PageHeader";
+import { Screen } from "@/components/Screen";
+import { ErrorState, LoadingState } from "@/components/States";
+import { colors, spacing } from "@/constants/theme";
+import { useApi } from "@/hooks/useApi";
+import { PATIENT_ID, api } from "@/services/api";
+import { clearSession } from "@/services/session";
+import type { Consent, Patient } from "@/types/api";
+
+export default function Profile() { const state = useApi(async () => { const [patient, consents] = await Promise.all([api<Patient>(`/patients/${PATIENT_ID}`), api<Consent[]>("/consents")]); return { patient, consents }; }, []); async function logout() { await clearSession(); router.replace("/(auth)/login"); } if (state.loading) return <Screen><LoadingState/></Screen>; if (!state.data) return <Screen><ErrorState message={state.error}/></Screen>; const patient = state.data.patient; const allergies = JSON.parse(patient.allergies_json || "[]"); return <Screen><PageHeader title="Profile" subtitle="Personal and privacy settings"/><View style={styles.identity}><View style={styles.avatar}><MaterialCommunityIcons name="account" size={43} color={colors.primary}/></View><Text style={styles.name}>{patient.name}</Text><Text style={styles.email}>{patient.email}</Text></View><Card title="Personal details"><Detail label="Date of birth" value={patient.dob}/><Detail label="Blood type" value={patient.blood_type}/><Detail label="Phone" value={patient.phone}/><Detail label="Emergency contact" value={patient.emergency_contact}/><Detail label="Allergies" value={allergies.map((x: { name: string }) => x.name).join(", ") || "None recorded"}/></Card><Card title="Health services"><ListRow icon="shield-lock-outline" title="Data permissions" subtitle={`${state.data.consents.filter(x => x.status === "ACTIVE").length} active grants`} onPress={() => router.push("/permissions")}/><ListRow icon="shield-check-outline" title="Insurance" subtitle={patient.insurance_plan} onPress={() => router.push("/insurance")}/><ListRow icon="bell-outline" title="Notifications" onPress={() => router.push("/notifications")}/><ListRow icon="clipboard-pulse-outline" title="Post-discharge check-in" onPress={() => router.push("/post-discharge")}/></Card><AppButton label="Sign out of demo" variant="secondary" onPress={logout}/><Text style={styles.disclaimer}>All displayed identities and records are synthetic demo data.</Text></Screen>; }
+function Detail({ label, value }: { label: string; value: string }) { return <View style={styles.detail}><Text style={styles.label}>{label}</Text><Text style={styles.value}>{value || "Not recorded"}</Text></View>; }
+const styles = StyleSheet.create({ identity: { alignItems: "center", paddingVertical: spacing.md }, avatar: { width: 86, height: 86, borderRadius: 30, backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" }, name: { color: colors.text, fontSize: 24, fontWeight: "900", marginTop: spacing.md }, email: { color: colors.secondary, marginTop: 4 }, detail: { flexDirection: "row", justifyContent: "space-between", gap: 20, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border }, label: { color: colors.secondary }, value: { color: colors.text, fontWeight: "700", flex: 1, textAlign: "right" }, disclaimer: { color: colors.secondary, textAlign: "center", fontSize: 11 } });
