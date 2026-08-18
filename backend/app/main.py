@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -9,12 +10,14 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .ai import ai_service
+from .documents import ALLOWED, classify, extract_text, file_hash, parse_lab
 
 ROOT = Path(__file__).resolve().parents[1]
+UPLOAD_DIR = ROOT / "uploads"; UPLOAD_DIR.mkdir(exist_ok=True)
 db_url = os.getenv("DATABASE_URL", f"sqlite:///{ROOT / 'healthtech.db'}")
 DB_PATH = Path(db_url.replace("sqlite:///", ""))
 AVERAGE_CONSULTATION_MINUTES = 15
@@ -63,6 +66,7 @@ CREATE TABLE IF NOT EXISTS cv_events (id TEXT PRIMARY KEY, room_id TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS safety_event_details (event_id TEXT PRIMARY KEY, patient_state TEXT, previous_state TEXT, status TEXT NOT NULL, acknowledged_at TEXT, acknowledged_by TEXT, resolved_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS safety_tasks (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, room_id TEXT NOT NULL, title TEXT NOT NULL, assigned_role TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor_id TEXT, event_type TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, details_json TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS medical_documents (id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, uploaded_by TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL, storage_path TEXT NOT NULL, file_hash TEXT NOT NULL, document_type TEXT NOT NULL, processing_status TEXT NOT NULL, raw_text TEXT, extraction_json TEXT NOT NULL, confirmed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(patient_id,file_hash));
 """
 
 
@@ -165,6 +169,7 @@ class CheckinIn(BaseModel): pain_score:int=Field(ge=1,le=10); temperature:float;
 class CVEventIn(BaseModel): room_id:str; event_type:Literal["FALL_RISK","PATIENT_STANDING","OUT_OF_BED"]="FALL_RISK"; severity:Literal["HIGH","CRITICAL","WARNING","MEDIUM"]="HIGH"; confidence:float=Field(ge=0,le=1); patient_state:str="STANDING"; previous_state:str="SITTING"; timestamp:datetime|None=None; metadata:dict[str,Any]=Field(default_factory=dict)
 class ReadIn(BaseModel): ids:list[str]=[]
 class AITextIn(BaseModel): patient_id:str|None=None; notes:str=""; missing:list[str]=[]; task_id:str|None=None
+class DocumentConfirmIn(BaseModel): results:list[dict[str,Any]]=[]; report_date:str|None=None; source_name:str|None=None
 
 @app.get("/health")
 def health(): return {"status":"ok","demo_mode":True}
@@ -186,6 +191,49 @@ def timeline(patient_id:str,user:DemoUser=Depends(current_user)):
 @app.get("/patients/{patient_id}/lab-results")
 def labs(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn: return rows(conn.execute("SELECT * FROM lab_results WHERE patient_id=? ORDER BY result_date DESC",(patient_id,)).fetchall())
+def document_access(conn, document:dict, user:DemoUser):
+    if user.role=="PATIENT":
+        if one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(document["patient_id"],user.id)):return
+    if user.role=="DOCTOR":
+        doctor=one(conn,"SELECT id FROM doctors WHERE user_id=?",(user.id,))
+        if doctor and "LAB_RESULTS" in active_consent(conn,document["patient_id"],doctor["id"]):return
+    raise HTTPException(403,"Document access is not authorized")
+@app.post("/documents/upload",status_code=201)
+async def upload_document(file:UploadFile=File(...),patient_id:str="patient_hasan",user:DemoUser=Depends(current_user)):
+    if file.content_type not in ALLOWED: raise HTTPException(415,"Please upload a PDF, PNG, or JPG file.")
+    data=await file.read()
+    if len(data)>15*1024*1024: raise HTTPException(413,"Maximum file size is 15 MB.")
+    with db() as conn:
+        if user.role=="PATIENT":
+            if not one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(patient_id,user.id)):raise HTTPException(403,"Patient mismatch")
+        elif user.role=="DOCTOR":
+            doctor=one(conn,"SELECT id FROM doctors WHERE user_id=?",(user.id,))
+            if not doctor or "LAB_RESULTS" not in active_consent(conn,patient_id,doctor["id"]):raise HTTPException(403,"Valid lab-result consent is required")
+        else: raise HTTPException(403,"Only patient or authorized doctor can upload")
+        digest=file_hash(data); existing=one(conn,"SELECT id FROM medical_documents WHERE patient_id=? AND file_hash=?",(patient_id,digest))
+        if existing: raise HTTPException(409,"This document appears to have already been uploaded.")
+        did=uid("doc"); safe_name=re.sub(r"[^A-Za-z0-9._-]","_",file.filename or "document"); target=UPLOAD_DIR/f"{did}_{safe_name}"; target.write_bytes(data); text=extract_text(data,file.content_type or ""); dtype,confidence=classify(text); parsed=parse_lab(text) if dtype=="LAB_REPORT" else {"results":[]}; parsed.update({"document_type":dtype,"confidence":confidence}); state="NEEDS_REVIEW" if parsed["results"] else "UPLOADED"; conn.execute("INSERT INTO medical_documents VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(did,patient_id,user.id,safe_name,file.content_type,len(data),str(target),digest,dtype,state,text,json.dumps(parsed),None,now(),now())); notify(conn,user_id=user.id,kind="INFO",message="Document processed. Review extracted information before confirming.",related_type="document",related_id=did); audit(conn,user.id,"DOCUMENT_UPLOADED","document",did,{"type":dtype}); return {"document_id":did,"status":state,"extraction":parsed}
+@app.get("/documents")
+def documents(patient_id:str="patient_hasan",user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        if user.role=="PATIENT" and not one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(patient_id,user.id)):raise HTTPException(403,"Patient mismatch")
+        return rows(conn.execute("SELECT id,filename,document_type,processing_status,created_at,confirmed_at FROM medical_documents WHERE patient_id=? ORDER BY created_at DESC",(patient_id,)).fetchall())
+@app.get("/documents/{document_id}")
+def document_detail(document_id:str,user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        doc=one(conn,"SELECT * FROM medical_documents WHERE id=?",(document_id,));
+        if not doc:raise HTTPException(404,"Document not found")
+        document_access(conn,doc,user); return doc
+@app.post("/documents/{document_id}/confirm")
+def confirm_document(document_id:str,payload:DocumentConfirmIn,user:DemoUser=Depends(require("PATIENT"))):
+    with db() as conn:
+        doc=one(conn,"SELECT * FROM medical_documents WHERE id=?",(document_id,));
+        if not doc:raise HTTPException(404,"Document not found")
+        document_access(conn,doc,user); extracted=json.loads(doc["extraction_json"]); results=payload.results or extracted.get("results",[]); report_date=payload.report_date or date.today().isoformat(); source=payload.source_name or "Uploaded document"; record=uid("record"); conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(record,doc["patient_id"],"LAB_RESULT",doc["filename"],report_date,None,None,"LAB_RESULTS",json.dumps({"source_document_id":document_id,"results":results}),doc["raw_text"],now()))
+        for item in results:
+            if not item.get("test_name") or item.get("value") is None:continue
+            conn.execute("INSERT INTO lab_results VALUES(?,?,?,?,?,?,?)",(uid("lab"),doc["patient_id"],item["test_name"],float(item["value"]),item.get("unit","") or "",item.get("reference_text","") or "",report_date,record))
+        conn.execute("UPDATE medical_documents SET processing_status='CONFIRMED',confirmed_at=?,updated_at=? WHERE id=?",(now(),now(),document_id)); notify(conn,user_id=user.id,kind="SUCCESS",message="Lab results added to your health timeline.",related_type="document",related_id=document_id); audit(conn,user.id,"DOCUMENT_CONFIRMED","document",document_id,{"result_count":len(results),"source":source}); return {"status":"CONFIRMED","record_id":record,"results_created":len(results)}
 @app.get("/patients/{patient_id}/trends")
 def lab_trends(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn: return {"trends":trends(conn,patient_id),"conflicts":conflicts(conn,patient_id),"care_navigation":specialty_for(trends(conn,patient_id))}
