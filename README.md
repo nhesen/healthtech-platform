@@ -1,127 +1,290 @@
 # HealthTech Platform
 
-A demo-ready healthcare journey for patients, doctors, and hospital operations. The app uses fully synthetic Azerbaijani-style data and is decision support only: it does not diagnose conditions or replace clinical judgment.
+> An AI-assisted healthcare intelligence layer for continuous patient care, clinician decision support, hospital operations, and patient safety.
 
-## What works
+**Patient Mobile -> Doctor Web -> Hospital Operations -> Patient Safety**
 
-- Native Expo Patient app with secure demo login, five-tab navigation, safe areas, mobile charts, document/camera picking, and LAN-configurable API access
-- Dedicated Next.js Doctor and Hospital Admin web panels; old patient web routes provide a clear mobile handoff
-- Patient health profile, database-backed timeline, repeated lab measurements, trends, record conflicts, and deterministic specialty navigation
-- Doctor directory, availability, AZN insurance estimates, booking, rescheduling, cancellation, and queue calculation
-- Category-based consent with expiry/revocation, privacy history, consent-filtered doctor brief, and doctor-approved consultation records
-- Post-discharge check-ins with worsening-state alerts
-- 200-bed hospital command center, discharge blockers, task start/completion, discharge, cleaning, and capacity recalculation
-- Central AI provider abstraction with a deterministic no-key fallback
-- Fall-risk event ingestion, cooldown deduplication, notifications, nurse tasks, acknowledgement, and resolution
-- Polling-based live updates for dashboards, tasks, safety events, queue data, and notifications
-- PDF/JPG/PNG upload, hash deduplication, PDF text extraction, lab classification/parsing, editable review, confirmation, timeline linking, and trend updates
-- Demo reset endpoint and a real synthetic lab PDF at `backend/demo_documents/hasan_lab_report.pdf`
+HealthTech connects longitudinal patient records, consent-aware clinical context, appointment and insurance workflows, operational capacity data, and computer-vision safety events through one FastAPI backbone. It is a hackathon MVP built entirely with synthetic medical data and designed to support human decisions, not replace them.
+
+[Architecture](docs/ARCHITECTURE.md) | [Demo script](docs/DEMO.md) | [Deployment](DEPLOYMENT.md) | [Submission package](docs/SUBMISSION.md) | [Contributing](CONTRIBUTING.md)
+
+## Overview
+
+Healthcare workflows often fragment information across patient files, clinician tools, scheduling systems, operational dashboards, and safety processes. HealthTech demonstrates a connected intelligence layer that turns structured events into explainable insights and then into permissioned, auditable actions.
+
+The core loop is:
+
+```text
+Insight or prediction -> Decision support -> Human-approved action -> Updated shared state
+```
+
+The platform does not claim to replace an EHR, diagnose conditions, prescribe treatment, or autonomously control hospital operations.
+
+## Problem
+
+- Patients struggle to understand health changes across time and across documents.
+- Clinicians spend time finding relevant history and checking whether data access is permitted.
+- Appointment, insurance, consent, and queue information often live in separate workflows.
+- Hospital teams need a shared view of beds, discharge blockers, tasks, and incoming demand.
+- Patient-safety events require fast notification and a clear response trail.
+
+## Solution
+
+HealthTech provides the right information to the right role at the right time:
+
+- Patients receive a longitudinal view of their health, explainable trend summaries, care navigation, booking, and explicit data controls.
+- Doctors receive appointment-linked, consent-filtered clinical context and reviewable AI drafts.
+- Hospital administrators receive live capacity, discharge, prioritization, and safety workflows.
+- A separate CV service turns pose-state transitions into backend safety events without face recognition or identity inference.
+
+## Product interfaces
+
+### Patient Mobile App
+
+The patient experience is a native Expo / React Native application in [`apps/patient-mobile`](apps/patient-mobile).
+
+- Personal health overview and longitudinal timeline
+- Lab trends and comparison views
+- PDF, PNG, and JPEG medical-document upload
+- Extracted-value review before confirmation
+- AI-assisted explanations and specialist suggestions
+- Doctor discovery, availability, and appointment booking
+- Backend-calculated insurance coverage in AZN
+- Time-limited category consent and revocation
+- Queue position, post-discharge check-ins, and notifications
+
+### Doctor Web Panel
+
+The clinician interface is part of the Next.js application in [`frontend`](frontend).
+
+- Daily patients, appointments, and alerts
+- Appointment-relationship and consent-aware patient access
+- Relevant patient brief and medical timeline
+- Consultation workspace and reviewable AI draft
+- Missing-information warnings
+- Clinician approval before final notes enter the timeline
+
+### Hospital Admin Web Panel
+
+The operational interface shares the same Next.js deployment.
+
+- Command center and 200-bed capacity view
+- Department, bed, and patient-flow status
+- Discharge blockers and prioritized operational tasks
+- Capacity forecast and recommendations
+- Room 204 patient-safety alerts
+- Nurse task, acknowledgement, resolution, and audit flow
+
+## Main patient journey
+
+```mermaid
+flowchart LR
+    A[Medical document] --> B[Structured lab result]
+    B --> C[Longitudinal trend]
+    C --> D[AI explanation]
+    D --> E[Specialty suggestion]
+    E --> F[Doctor search]
+    F --> G[Insurance estimate]
+    G --> H[Appointment]
+    H --> I[Patient consent]
+    I --> J[Doctor patient brief]
+```
+
+The extracted document remains untrusted until the patient reviews and confirms it. The doctor brief remains unavailable until both an appointment relationship and matching active consent exist.
 
 ## Architecture
 
-```text
-Expo SDK 57 / React Native / Expo Router (Patient)
-Next.js 15 / React / Tailwind (Doctor + Hospital Admin)
-                         |
-                         v
-FastAPI modular MVP (RBAC + domain APIs + deterministic engines)
-          |                         |
-          v                         v
-SQLite locally or            Central AI adapter
-Supabase PostgreSQL          live provider -> safe fallback
-
-Separate Python CV module -> POST /cv-events
+```mermaid
+flowchart TB
+    Phone[Physical phone] --> Expo[Expo Patient App]
+    Browser[Laptop browser] --> Web[Next.js Doctor and Admin]
+    Expo -->|HTTPS JSON API| API[FastAPI Backend]
+    Web -->|HTTPS JSON API| API
+    API --> DB[(SQLite local or Supabase PostgreSQL)]
+    API --> AI[Live AI provider]
+    AI -. failure .-> Fallback[Deterministic AI fallback]
+    CV[Local YOLO Pose or simulator] -->|Signed CV event| API
+    API --> Uploads[(Private backend uploads)]
 ```
 
-SQLite and header-based demo authentication are intentional hackathon choices. A Supabase PostgreSQL connection is supported through `DATABASE_URL`; local development still defaults to SQLite. The Expo app reuses the demo authentication contract and stores its demo session with Expo SecureStore. Protected APIs require `X-Demo-User`; there is no implicit patient fallback. Demo authentication and reset fail closed when `DEMO_MODE=false`. Supabase Auth and Supabase Storage are not implemented, so a future real-data production launch still requires that security migration.
+FastAPI owns authorization, consent, insurance math, state transitions, audit events, and persistence. AI output is advisory. The recommended hackathon CV topology is a prepared video or simulator on the presentation laptop sending events to the public backend.
 
-## Deployment
+See [Architecture Documentation](docs/ARCHITECTURE.md) for component boundaries, domain data, security controls, and deployment topology.
 
-Use [DEPLOYMENT.md](DEPLOYMENT.md) for the Render backend, Supabase PostgreSQL, Vercel Doctor/Admin panel, Expo Go phone setup, local CV sender, environment matrix, exact migration/seed/reset commands, and hackathon pre-flight procedure. The Patient app is Expo and is never deployed to Vercel.
+## Technology stack
 
-## Run locally
+| Layer | Technology |
+|---|---|
+| Patient mobile | Expo SDK 57, React Native 0.86, TypeScript, Expo Router |
+| Doctor/Admin web | Next.js 15, React 19, TypeScript, Tailwind CSS |
+| API | FastAPI, Pydantic, Uvicorn, Python 3.11+ |
+| Database | SQLite locally; PostgreSQL/Supabase through `DATABASE_URL` |
+| Documents | Multipart upload, signature validation, pypdf extraction |
+| AI | Backend provider adapter with live OpenAI-compatible API and deterministic fallback |
+| Computer vision | Python, optional Ultralytics YOLO Pose / OpenCV, deterministic simulator |
+| Delivery | Docker Compose, Render blueprint, Vercel config, optional EAS build |
 
-Use official CPython 3.11+ (not an MSYS Python build). Expo SDK 57 requires Node.js 22.13+; the Next.js web panels also work with that version.
+## AI layer
 
-Backend, from the repository root in PowerShell:
+AI runs only in the backend. Supported decision-support outputs include lab explanations, specialty suggestions, patient briefs, consultation drafts, missing-information warnings, record-conflict explanations, post-discharge summaries, and hospital recommendations.
+
+The safety contract is explicit:
+
+- Structured context is supplied by the backend.
+- Patient text is treated as untrusted data.
+- AI cannot authorize access or mutate appointments, consent, beds, discharge, or safety state.
+- Invalid, unavailable, or unconfigured live AI falls back to deterministic output.
+- Clinical drafts require human review and approval.
+
+## Patient safety and computer vision
+
+The CV service observes explainable pose states such as `LYING`, `SITTING`, and `STANDING`. Stable-frame confirmation and cooldown prevent alert spam. A qualifying transition creates a real `/cv-events` backend event, updates Room 204, notifies hospital operations, and supports nurse dispatch, acknowledgement, and resolution.
+
+The service performs no face recognition, identity recognition, diagnosis, or autonomous clinical action.
+
+## Demo
+
+The deterministic demo tells one connected story:
+
+1. Hasan M. uploads a synthetic lab report and confirms extracted values.
+2. HealthTech shows an increasing HbA1c trend and suggests endocrinology review without diagnosing.
+3. Hasan books Dr. Leyla Mammadova: `60 AZN`, `48 AZN` covered, `12 AZN` patient payment.
+4. Hasan grants time-limited categories; the Doctor panel can then open the relevant brief.
+5. The doctor reviews and approves a consultation note.
+6. Hospital Admin resolves Patient #104's discharge blocker and releases a bed.
+7. The local CV simulator sends a fall-risk event; Room 204 updates in the Admin panel.
+8. Demo Reset restores the exact initial state.
+
+Follow the judge-ready [Demo Script](docs/DEMO.md). Product screenshot targets are documented in [`docs/screenshots`](docs/screenshots/README.md).
+
+## Repository structure
+
+```text
+healthtech-platform/
+|-- apps/
+|   `-- patient-mobile/    Expo patient application
+|-- backend/               FastAPI API, database, AI, documents, seed, tests
+|-- cv_service/            YOLO Pose adapter, simulator, CV tests
+|-- frontend/              Next.js Doctor and Hospital Admin application
+|-- docs/                  Architecture, demo, submission, screenshot guide
+|-- compose.yml            Local Docker stack
+|-- render.yaml            Backend deployment blueprint
+|-- DEPLOYMENT.md          Cloud and physical-device runbook
+|-- .env.example           Safe root environment template
+`-- README.md
+```
+
+The current structure is intentionally retained because each deployable component already has a clear boundary.
+
+## Local setup
+
+### Prerequisites
+
+- Official CPython 3.11 or newer
+- Node.js 22.13 or newer
+- npm
+- Expo Go on the physical phone
+- Docker Desktop, optional
+
+### 1. Backend
+
+From the repository root in PowerShell:
 
 ```powershell
 python -m venv .venv-win
 .\.venv-win\Scripts\python.exe -m pip install -r backend\requirements.txt
 $env:PYTHONPATH="backend"
+.\.venv-win\Scripts\python.exe -m app.migrate
+.\.venv-win\Scripts\python.exe -m app.seed
 .\.venv-win\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Patient mobile app, in a second terminal:
+- API documentation: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
 
-```powershell
-Copy-Item apps\patient-mobile\.env.example apps\patient-mobile\.env
-# Edit the copied file and set EXPO_PUBLIC_API_URL to this computer's LAN IPv4 address.
-cd apps\patient-mobile
-npm install
-npx expo start --lan
-```
-
-Scan the QR code with Expo Go. The phone and computer must be on the same network. Run `ipconfig`, use the active Wi-Fi/Ethernet IPv4 address (for example `192.168.x.x`), and set `EXPO_PUBLIC_API_URL=http://192.168.x.x:8000`. Do not use `localhost`, because on a physical phone that means the phone itself. Allow Python/Node and ports 8000/8081 through the private-network firewall if prompted.
-
-Doctor and Hospital Admin web panels, in a third terminal:
+### 2. Doctor and Admin web
 
 ```powershell
 cd frontend
-npm install
+Copy-Item .env.example .env.local
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`. The web entry deliberately exposes Doctor/Admin roles only; legacy Patient web URLs show a mobile-app handoff. API documentation is at `http://localhost:8000/docs`.
+Open `http://localhost:3000`, `/doctor`, or `/admin`.
 
-## Run with Docker
+### 3. Patient mobile
 
-Start the backend and frontend from the repository root:
+```powershell
+cd apps\patient-mobile
+Copy-Item .env.example .env
+# Set EXPO_PUBLIC_API_URL to the public HTTPS API or the laptop LAN IPv4 URL.
+npm ci
+npx expo start --lan
+```
+
+Scan the QR code with Expo Go. A phone cannot use `localhost` to reach the laptop.
+
+### 4. CV simulator
+
+With the backend running:
+
+```powershell
+$env:PYTHONPATH="cv_service"
+$env:CV_BACKEND_URL="http://localhost:8000"
+.\.venv-win\Scripts\python.exe cv_service\run_demo.py --simulate
+```
+
+## Docker quick start
 
 ```powershell
 docker compose up --build -d
 docker compose ps
 ```
 
-Open `http://localhost:3000`. Backend health is available at `http://localhost:8000/health`.
+The web panel is available at `http://localhost:3000` and the API at `http://localhost:8000`. Use `docker compose --profile cv run --rm cv-simulator` for the one-shot simulator.
 
-If port 3000 is already in use, choose another host port before starting:
+## Environment variables
+
+| Component | Required configuration |
+|---|---|
+| Backend | `DATABASE_URL`, `DEMO_MODE`, `CORS_ORIGINS` |
+| Backend AI | `AI_PROVIDER`, optional `AI_API_KEY`, `AI_MODEL`, `AI_BASE_URL` |
+| Backend CV | `CV_SERVICE_TOKEN`, `CV_HOSPITAL_ID` |
+| Patient mobile | `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO_MODE` |
+| Doctor/Admin web | `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE` |
+| CV laptop | `CV_BACKEND_URL`, `CV_SERVICE_TOKEN`, `CV_MODEL`, `CV_VIDEO_PATH` |
+
+Use the committed `.env.example` files. Never commit real `.env` files or expose database, AI, service-role, or CV secrets through public frontend variables.
+
+## Demo accounts
+
+| Role | Synthetic identity |
+|---|---|
+| Patient | `patient@demo.az` |
+| Doctor | `doctor@demo.az` |
+| Hospital admin | `admin@demo.az` |
+
+Demo authentication uses the `X-Demo-User` header. It is enabled only when `DEMO_MODE=true`.
+
+## Demo reset and pre-flight
 
 ```powershell
-$env:FRONTEND_PORT="3001"
-$env:CORS_ORIGINS="http://localhost:3001"
-docker compose up --build -d
+# Restore deterministic synthetic data directly.
+$env:PYTHONPATH="backend"
+.\.venv-win\Scripts\python.exe -m app.seed
+
+# Check a running backend.
+.\.venv-win\Scripts\python.exe backend\scripts\demo_check.py
+
+# Reset through the API.
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/demo/reset" `
+  -Headers @{"X-Demo-User"="admin@demo.az"}
 ```
 
-Run the optional one-shot CV simulator after the stack is healthy:
+Reset is transactional, demo-scoped, and rejected when `DEMO_MODE=false`.
 
-```powershell
-docker compose --profile cv run --rm cv-simulator
-```
-
-Stop the application without deleting its database or uploaded-document volumes:
-
-```powershell
-docker compose down
-```
-
-To intentionally remove demo volumes as well, use `docker compose down -v`.
-
-Optional environment variables:
-
-```powershell
-$env:NEXT_PUBLIC_API_URL="http://localhost:8000"
-$env:EXPO_PUBLIC_API_URL="http://192.168.x.x:8000"
-$env:CORS_ORIGINS="http://localhost:3000,http://localhost:8081"
-$env:AI_PROVIDER="mock"  # use openai only with a server-side AI_API_KEY
-$env:DEMO_MODE="true"
-$env:NEXT_PUBLIC_DEMO_MODE="true"
-$env:EXPO_PUBLIC_DEMO_MODE="true"
-```
-
-Copy [.env.example](.env.example) when configuring a deployment. Never place real secrets in frontend variables or commit them. A production CV sender must configure the same `CV_SERVICE_TOKEN` on the backend and CV process; demo-mode admin headers are accepted only while `DEMO_MODE=true`.
-
-## Tests and build
+## Testing
 
 ```powershell
 $env:PYTHONPATH="backend"
@@ -139,94 +302,43 @@ npx expo-doctor
 npx expo export --platform android
 ```
 
-## CV safety demo
+The backend integration suite covers patient-to-doctor synchronization, consent boundaries, document confirmation, appointments, hospital state transitions, CV events, notifications, reset reliability, and security rules.
 
-Start the backend, then run from the repository root:
+## Security and privacy principles
 
-```powershell
-$env:PYTHONPATH="cv_service"
-.\.venv-win\Scripts\python.exe cv_service\run_demo.py --simulate
-```
+- Only synthetic medical data is permitted in this public hackathon repository.
+- Patient ownership and role checks are enforced by the API.
+- Doctor clinical access requires an appointment relationship and matching active consent.
+- Hospital admins receive operational access, not unrestricted clinical histories.
+- Uploads are checked by extension, MIME type, size, and file signature.
+- Private storage paths and hashes are not returned to clients.
+- Sensitive responses receive `no-store` headers; API responses include security headers.
+- AI keys, database credentials, and CV tokens remain server-side.
+- Audit events record sensitive workflow actions.
 
-The simulator performs the stabilized `LYING -> SITTING -> STANDING` transition and sends the real fall-risk event to the backend. Video/camera modes remain extension points and fail safely when no pose model is installed.
+See [SECURITY.md](SECURITY.md) for the public-repository policy and reporting guidance.
 
-Optional real YOLO Pose video mode:
+## Known MVP limitations
 
-```powershell
-.\.venv-win\Scripts\python.exe -m pip install -r cv_service\requirements-vision.txt
-$env:PYTHONPATH="cv_service"
-.\.venv-win\Scripts\python.exe cv_service\run_demo.py --video path\to\prepared-demo.mp4
-```
+- Authentication is synthetic demo-header authentication; Supabase Auth is not implemented.
+- Supabase PostgreSQL is supported, but this repository does not use Supabase Storage.
+- Uploaded files require a persistent backend disk in cloud deployments.
+- Realtime behavior uses reliable polling rather than push notifications or WebSockets.
+- Live AI requires a server-side provider key; deterministic fallback works without one.
+- Prepared-video YOLO mode needs optional model dependencies and hardware; the simulator is the reliable fallback.
+- Physical-device, public-cloud, and live-provider verification require external accounts and credentials.
+- No open-source license has been selected; default copyright rules apply.
 
-## Demo accounts
+## Future work
 
-| Role | Demo identity |
-|---|---|
-| Patient | `patient@demo.az` |
-| Doctor | `doctor@demo.az` |
-| Hospital admin | `admin@demo.az` |
+- Replace demo headers with production identity and token validation.
+- Add private object storage with signed access.
+- Add production observability, backups, recovery testing, and compliance review.
+- Add native push notifications and a formal realtime transport where justified.
+- Run clinical, accessibility, security, and human-factors validation before real-world use.
 
-The Expo app provides **Continue as Patient** and persists the demo patient session securely. The Next.js role switcher contains Doctor and Hospital Admin only. Direct demo API requests use the `X-Demo-User` header.
+## Hackathon and team
 
-The role switcher, reset control, bundled-document shortcut, consultation notes, queue controls, and safety simulator are marked as demo tools. They are hidden by the frontend and rejected by the backend when demo mode is disabled.
+HealthTech is a hackathon MVP maintained in the public [`nhesen/healthtech-platform`](https://github.com/nhesen/healthtech-platform) repository. Add final event, team-member, public URL, slide-deck, and demo-video details to [the submission checklist](docs/SUBMISSION.md) before judging.
 
-## Seed and pre-flight
-
-Create or restore the deterministic base dataset from the repository root:
-
-```powershell
-$env:PYTHONPATH="backend"
-.\.venv-win\Scripts\python.exe -m app.seed
-```
-
-With the backend running, perform a read-only readiness check:
-
-```powershell
-.\.venv-win\Scripts\python.exe backend\scripts\demo_check.py
-```
-
-The check validates the database, demo identities, available slot, 200/195 bed state, Patient #104 blocker, Room 204, bundled PDF, deterministic AI fallback, and CV simulator contract.
-
-## Reset demo data
-
-The reset endpoint is available only while `DEMO_MODE=true`:
-
-```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/demo/reset -Headers @{"X-Demo-User"="admin@demo.az"}
-```
-
-It restores Hasan's health history, Dr. Leyla, appointments and slots, consent, notifications, 195/200 occupancy, Patient #104's blocker/task, and Room 204's stable safety state.
-
-The same action is available as **Reset Demo** in the top-level Demo Mode controls and requires confirmation. Reset is transactional, idempotent, and targets only deterministic synthetic demo records; unrelated records are preserved.
-
-## Exact reset state
-
-- Hasan M. has Premium Health, a Penicillin allergy, Metformin, coherent 2024–2026 history, and no active main appointment or consent.
-- HbA1c is `5.4 → 5.8 → 6.3`; glucose is `89 → 96 → 108`; Vitamin D is `17 → 21 → 28`; hemoglobin is stable at `14.0 → 14.1 → 14.1`.
-- The allergy conflict remains unresolved. Eight synthetic doctors exist. Dr. Leyla is an endocrinologist charging `60 AZN`; Premium Health covers `80%` (`48 AZN`), leaving `12 AZN`.
-- Dr. Leyla has four available tomorrow-relative slots. Three synthetic patients are ahead, so Hasan starts at queue position `4` with an estimated `45` minute wait after booking.
-- Caspian Medical Center has exactly `200` beds: `195` occupied and `5` available. Six discharges are expected, two are blocked, four are usable, twelve arrivals are expected, and the projected shortage is `3`.
-- Patient #104 has a pending high-priority lab-review task; Patient #207 has a medium-priority pharmacy blocker. Room 204 is `STABLE`, with no active safety event.
-- Notifications are limited to one initial patient, doctor, and admin notification. The uploadable lab PDF is available through **Upload Demo Lab**.
-
-## Exact phone → Doctor web → Admin web demo flow
-
-1. Reset Demo from the laptop web panel. On the phone, scan the Expo QR code and tap **Continue as Patient**.
-2. On the phone, open **Health → Documents → Upload document → Use Demo Lab Report**. Review `6.3 / 108 / 28 / 14.1`, confirm it, then show the HbA1c chart, conflict, AI insight, and Endocrinology recommendation.
-3. On the phone, open **Doctors**, select Dr. Leyla, choose a slot, show `60 AZN / 48 AZN covered / 12 AZN patient`, and confirm. Show queue position `4`, then grant Lab Results, Medications, Diagnoses, and Doctor Notes for `24 hours`.
-4. Move to the laptop Doctor web panel. Open Hasan, show the consent-filtered brief, load demo consultation notes, generate the draft, display missing dosage/allergy-reaction warnings, and approve the consultation.
-5. Switch the laptop to Hospital Admin. Resolve Patient #104's blocker, discharge, complete bed cleaning, and show `194 occupied / 6 available`. Open Patient Safety, simulate Room 204 fall risk, send a nurse, acknowledge, and resolve.
-
-The backend integration suite executes this complete mutation/reset story twice to guard against stale slots, duplicate records, old consent, completed tasks, bed drift, notifications, and active CV events.
-
-## Safety and privacy
-
-- Patient ownership and doctor consent are enforced in backend clinical endpoints.
-- Doctor clinical access requires both an appointment relationship and active, category-matching consent.
-- Hospital admins can access operational data but not full patient clinical histories.
-- Hospital resources, alerts, CV events, tasks, and audit views are scoped to the admin's assigned hospital.
-- Appointment, task, discharge, bed-cleaning, and safety-event state transitions are validated by the backend.
-- Uploads are checked by extension, MIME type, size, and file signature; internal storage paths and hashes are not returned.
-- AI never controls authentication, consent, insurance math, appointments, tasks, discharge, beds, or capacity.
-- Extracted document data remains untrusted until a patient reviews and confirms it.
-- No real patient data or client-side API secrets are included.
+This project contains synthetic demonstration data only and is not a medical device.

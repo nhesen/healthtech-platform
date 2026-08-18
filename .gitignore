@@ -1,19 +1,40 @@
+# Python environments, caches, and local data
 .venv/
 .venv-win/
+venv/
 .runtime/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.coverage
+htmlcov/
 backend/*.db
 backend/tests/*.db
 backend/uploads/
-backend/.pytest_cache/
-cv_service/.pytest_cache/
-__pycache__/
-*.pyc
+
+# JavaScript and Expo build output
 node_modules/
 .next/
 .expo/
-apps/patient-mobile/dist/
+dist/
+
+# Local environment files; safe examples remain tracked
 .env*
 !.env.example
-venv/
+
+# CV weights, caches, and generated output
 *.pt
 *.onnx
+cv_service/runs/
+cv_service/output/
+.ultralytics/
+
+# Logs, editors, and operating-system noise
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
