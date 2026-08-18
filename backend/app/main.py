@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, admi
 CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, user_id TEXT, role TEXT, type TEXT NOT NULL, message TEXT NOT NULL, related_type TEXT, related_id TEXT, read_at TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS checkins (id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, discharge_id TEXT, checkin_date TEXT NOT NULL, pain_score INTEGER NOT NULL, temperature REAL NOT NULL, medication_taken INTEGER NOT NULL, symptoms TEXT, notes TEXT);
 CREATE TABLE IF NOT EXISTS cv_events (id TEXT PRIMARY KEY, room_id TEXT NOT NULL, event_type TEXT NOT NULL, severity TEXT NOT NULL, confidence REAL NOT NULL, occurred_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS safety_event_details (event_id TEXT PRIMARY KEY, patient_state TEXT, previous_state TEXT, status TEXT NOT NULL, acknowledged_at TEXT, acknowledged_by TEXT, resolved_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS safety_tasks (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, room_id TEXT NOT NULL, title TEXT NOT NULL, assigned_role TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor_id TEXT, event_type TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, details_json TEXT NOT NULL, created_at TEXT NOT NULL);
 """
 
@@ -159,7 +161,7 @@ class RescheduleIn(BaseModel): slot_id:str
 class ConsentIn(BaseModel): doctor_id:str; categories:list[str]; hours:int=Field(24,ge=1,le=168)
 class ConsultationIn(BaseModel): appointment_id:str; transcript:str=""; doctor_notes:str=""; final_note:str|None=None; complete:bool=False
 class CheckinIn(BaseModel): pain_score:int=Field(ge=1,le=10); temperature:float; medication_taken:bool; symptoms:str=""; notes:str=""
-class CVEventIn(BaseModel): room_id:str; event_type:Literal["FALL_RISK"]; severity:Literal["HIGH","CRITICAL","WARNING"]="HIGH"; confidence:float=Field(ge=0,le=1); timestamp:datetime|None=None
+class CVEventIn(BaseModel): room_id:str; event_type:Literal["FALL_RISK","PATIENT_STANDING","OUT_OF_BED"]="FALL_RISK"; severity:Literal["HIGH","CRITICAL","WARNING","MEDIUM"]="HIGH"; confidence:float=Field(ge=0,le=1); patient_state:str="STANDING"; previous_state:str="SITTING"; timestamp:datetime|None=None; metadata:dict[str,Any]=Field(default_factory=dict)
 class ReadIn(BaseModel): ids:list[str]=[]
 class AITextIn(BaseModel): patient_id:str|None=None; notes:str=""; missing:list[str]=[]; task_id:str|None=None
 
@@ -353,7 +355,9 @@ def checkin(patient_id:str,payload:CheckinIn,user:DemoUser=Depends(require("PATI
 @app.post("/cv-events",status_code=201)
 def cv_event(payload:CVEventIn,user:DemoUser=Depends(require("HOSPITAL_ADMIN","DOCTOR"))):
     with db() as conn:
-        eid=uid("cv"); conn.execute("INSERT INTO cv_events VALUES(?,?,?,?,?,?)",(eid,payload.room_id,payload.event_type,payload.severity,payload.confidence,(payload.timestamp or datetime.now(timezone.utc)).isoformat())); notify(conn,role="HOSPITAL_ADMIN",kind="CRITICAL",message=f"Room {payload.room_id}: patient attempting to stand without assistance.",related_type="cv_event",related_id=eid); return {"id":eid,"status":"alert_created"}
+        occurred=(payload.timestamp or datetime.now(timezone.utc)).isoformat(); recent=one(conn,"SELECT id FROM cv_events WHERE room_id=? AND event_type=? AND occurred_at>? ORDER BY occurred_at DESC",(payload.room_id,payload.event_type,(datetime.now(timezone.utc)-timedelta(seconds=30)).isoformat()))
+        if recent: return {"id":recent["id"],"status":"deduplicated","notification_created":False}
+        eid=uid("cv"); conn.execute("INSERT INTO cv_events VALUES(?,?,?,?,?,?)",(eid,payload.room_id,payload.event_type,payload.severity,payload.confidence,occurred)); conn.execute("INSERT INTO safety_event_details VALUES(?,?,?,?,?,?,?,?)",(eid,payload.patient_state,payload.previous_state,"ACTIVE",None,None,None,json.dumps(payload.metadata))); notify(conn,role="HOSPITAL_ADMIN",kind="CRITICAL",message=f"High fall risk — Room {payload.room_id}: patient attempting to stand without assistance.",related_type="cv_event",related_id=eid); audit(conn,user.id,"CV_EVENT_CREATED","cv_event",eid,{"room_id":payload.room_id,"state":payload.patient_state}); return {"id":eid,"status":"ACTIVE","notification_created":True}
 @app.get("/notifications")
 def notifications(user:DemoUser=Depends(current_user)):
     with db() as conn:return rows(conn.execute("SELECT * FROM notifications WHERE user_id=? OR role=? ORDER BY created_at DESC",(user.id,user.role)).fetchall())
@@ -365,7 +369,21 @@ def mark_read(payload:ReadIn,user:DemoUser=Depends(current_user)):
         return {"status":"ok"}
 @app.get("/safety/events")
 def safety_events(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
-    with db() as conn:return rows(conn.execute("SELECT * FROM cv_events ORDER BY occurred_at DESC",).fetchall())
+    with db() as conn:return rows(conn.execute("SELECT e.*,d.patient_state,d.previous_state,d.status,d.acknowledged_at,d.resolved_at FROM cv_events e LEFT JOIN safety_event_details d ON d.event_id=e.id ORDER BY e.occurred_at DESC",).fetchall())
+@app.patch("/cv-events/{event_id}/acknowledge")
+def acknowledge_event(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        conn.execute("UPDATE safety_event_details SET status='ACKNOWLEDGED',acknowledged_at=?,acknowledged_by=? WHERE event_id=?",(now(),user.id,event_id)); audit(conn,user.id,"CV_EVENT_ACKNOWLEDGED","cv_event",event_id); return {"id":event_id,"status":"ACKNOWLEDGED"}
+@app.post("/cv-events/{event_id}/send-nurse")
+def send_nurse(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        event=one(conn,"SELECT * FROM cv_events WHERE id=?",(event_id,));
+        if not event: raise HTTPException(404,"Safety event not found")
+        task_id=uid("safety_task"); conn.execute("INSERT INTO safety_tasks VALUES(?,?,?,?,?,?,?,?,?)",(task_id,event_id,event["room_id"],f"Assist Patient — Room {event['room_id']}","NURSE","CRITICAL","PENDING",now(),None)); notify(conn,role="HOSPITAL_ADMIN",kind="TASK",message=f"Nurse assistance task created for Room {event['room_id']}.",related_type="safety_task",related_id=task_id); audit(conn,user.id,"NURSE_TASK_CREATED","safety_task",task_id); return {"id":task_id,"status":"PENDING"}
+@app.patch("/cv-events/{event_id}/resolve")
+def resolve_event(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        conn.execute("UPDATE safety_event_details SET status='RESOLVED',resolved_at=? WHERE event_id=?",(now(),event_id)); audit(conn,user.id,"CV_EVENT_RESOLVED","cv_event",event_id); return {"id":event_id,"status":"RESOLVED"}
 @app.post("/demo/reset")
 def reset_demo(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     if DB_PATH.exists(): DB_PATH.unlink()
