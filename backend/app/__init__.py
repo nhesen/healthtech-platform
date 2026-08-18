@@ -1,0 +1,1 @@
+"""HealthTech modular-monolith backend."""

@@ -121,7 +121,29 @@ healthtech-platform/
 
 ## Local development
 
-Detailed setup instructions will be added as the frontend and backend are initialized. The final demo will support a local run mode so it remains usable if cloud services are unavailable during judging.
+Use a standard CPython 3.11+ installation (the official Python installer, not an MSYS Python build) and Node.js 20+.
+
+```bash
+# Terminal 1 — API
+cd backend
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt
+.venv/Scripts/uvicorn app.main:app --reload --port 8000
+
+# Terminal 2 — frontend
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The frontend targets `http://localhost:8000` by default. The backend creates and seeds a local SQLite database automatically on first start; use `X-Demo-User` with one of the demo emails to select a role when calling APIs directly.
+
+Run the backend critical-path tests with:
+
+```bash
+cd backend
+pytest
+```
 
 ## Roadmap
 
