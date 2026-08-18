@@ -12,6 +12,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from .ai import ai_service
 
 ROOT = Path(__file__).resolve().parents[1]
 db_url = os.getenv("DATABASE_URL", f"sqlite:///{ROOT / 'healthtech.db'}")
@@ -160,6 +161,7 @@ class ConsultationIn(BaseModel): appointment_id:str; transcript:str=""; doctor_n
 class CheckinIn(BaseModel): pain_score:int=Field(ge=1,le=10); temperature:float; medication_taken:bool; symptoms:str=""; notes:str=""
 class CVEventIn(BaseModel): room_id:str; event_type:Literal["FALL_RISK"]; severity:Literal["HIGH","CRITICAL","WARNING"]="HIGH"; confidence:float=Field(ge=0,le=1); timestamp:datetime|None=None
 class ReadIn(BaseModel): ids:list[str]=[]
+class AITextIn(BaseModel): patient_id:str|None=None; notes:str=""; missing:list[str]=[]; task_id:str|None=None
 
 @app.get("/health")
 def health(): return {"status":"ok","demo_mode":True}
@@ -273,7 +275,8 @@ def doctor_brief(patient_id:str,user:DemoUser=Depends(require("DOCTOR"))):
         d=one(conn,"SELECT * FROM doctors WHERE user_id=?",(user.id,)); allowed=active_consent(conn,patient_id,d["id"])
         if not allowed: raise HTTPException(403,"No active patient consent")
         p=one(conn,"SELECT p.*,u.name FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,)); data=trends(conn,patient_id); relevant=[x for x in data if x["metric"] in ("HbA1c","Glucose")] if d["specialty"]=="Endocrinology" else data; records=rows(conn.execute("SELECT * FROM medical_records WHERE patient_id=? AND category IN (%s) ORDER BY record_date DESC" % ",".join("?"*len(allowed)),(patient_id,*allowed)).fetchall()); audit(conn,user.id,"DOCTOR_VIEWED_RECORD","patient",patient_id,{"categories":allowed})
-        return {"patient":{"id":patient_id,"name":p["name"],"dob":p["dob"]},"reason_for_visit":"Endocrinology consultation","allowed_categories":allowed,"relevant_metrics":relevant,"medications":json.loads(p["medications_json"]) if "MEDICATIONS" in allowed else [],"allergies":json.loads(p["allergies_json"]),"important_history":[r["title"] for r in records],"warnings":conflicts(conn,patient_id),"summary":"HbA1c has increased from 5.4 to 6.3 over time. This is not a diagnosis; clinician review is required.","provider":"MockAIProvider"}
+        context={"relevant_metrics":relevant,"medications":json.loads(p["medications_json"]) if "MEDICATIONS" in allowed else [],"allergies":json.loads(p["allergies_json"])}; ai=ai_service.generate("patient_brief",context)
+        return {"patient":{"id":patient_id,"name":p["name"],"dob":p["dob"]},"reason_for_visit":"Endocrinology consultation","allowed_categories":allowed,"important_history":[r["title"] for r in records],"warnings":conflicts(conn,patient_id),**ai.content,"ai":ai.model_dump()}
 @app.post("/consultations",status_code=201)
 def consultation(payload:ConsultationIn,user:DemoUser=Depends(require("DOCTOR"))):
     with db() as conn:
@@ -285,7 +288,8 @@ def consultation(payload:ConsultationIn,user:DemoUser=Depends(require("DOCTOR"))
         if "symptom" in text and not any(x in text for x in ["day","week","month","duration"]): missing.append("Symptom duration not documented")
         cid=uid("consult"); state="COMPLETED" if payload.complete and payload.final_note else "DRAFT"; conn.execute("INSERT INTO consultations VALUES(?,?,?,?,?,?,?,?,?,?,?)",(cid,a["id"],a["patient_id"],d["id"],payload.transcript,payload.doctor_notes,"Structured draft: "+payload.doctor_notes,payload.final_note,state,now(),now() if state=="COMPLETED" else None))
         if state=="COMPLETED": conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(uid("record"),a["patient_id"],"DOCTOR_VISIT","Endocrinology consultation",date.today().isoformat(),None,d["id"],"DOCTOR_NOTES",json.dumps({"final_note":payload.final_note}),payload.final_note,now())); conn.execute("UPDATE appointments SET status='COMPLETED' WHERE id=?",(a["id"],)); audit(conn,user.id,"DOCTOR_APPROVED_NOTE","consultation",cid)
-        return {"id":cid,"status":state,"ai_draft":"Structured draft: "+payload.doctor_notes,"missing_information":missing}
+        draft=ai_service.generate("consultation_draft",{"notes":payload.doctor_notes}); missing_ai=ai_service.generate("missing_information",{"missing":missing})
+        return {"id":cid,"status":state,"ai_draft":draft.content,"missing_information":missing_ai.content["missing_items"],"ai":{"draft":draft.model_dump(),"missing":missing_ai.model_dump()}}
 @app.get("/hospitals/{hospital_id}/capacity")
 def hospital_capacity(hospital_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:return capacity(conn,hospital_id)
@@ -372,4 +376,23 @@ def audits(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
 @app.get("/ai/lab-explanation/{patient_id}")
 def ai_explain(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
-        data=trends(conn,patient_id); return {"provider":"MockAIProvider","summary":"HbA1c has increased consistently over recent measurements. An endocrinology consultation may be useful. This is not a diagnosis.","data":data}
+        data=trends(conn,patient_id); target=next((x for x in data if x["metric"]=="HbA1c"),data[0] if data else None)
+        if not target: raise HTTPException(404,"No trends available")
+        result=ai_service.generate("lab_explanation",{"trend":target}); return {"data":target,"ai":result.model_dump()}
+@app.post("/ai/specialty-recommendation")
+def ai_specialty(payload:AITextIn,user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        data=trends(conn,payload.patient_id or "patient_hasan"); deterministic=specialty_for(data); result=ai_service.generate("specialty",{"specialty":deterministic["suggested_specialty"],"reason":deterministic["reason"]}); return {"deterministic":deterministic,"ai":result.model_dump()}
+@app.post("/ai/record-conflict-explanation")
+def ai_conflict(payload:AITextIn,user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        found=conflicts(conn,payload.patient_id or "patient_hasan"); return {"conflicts":found,"ai":ai_service.generate("record_conflict",{"conflicts":found}).model_dump()}
+@app.post("/ai/post-discharge-summary")
+def ai_post_discharge(payload:AITextIn,user:DemoUser=Depends(current_user)):
+    return {"ai":ai_service.generate("post_discharge",{}).model_dump()}
+@app.post("/ai/hospital-recommendation")
+def ai_hospital(payload:AITextIn,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        task=one(conn,"SELECT * FROM tasks WHERE id=?",(payload.task_id or "task_104",));
+        if not task: raise HTTPException(404,"Task not found")
+        return {"ai":ai_service.generate("hospital_recommendation",{"title":task["title"],"reason":"The patient is discharge-ready and capacity is constrained.","impact":task["impact"]}).model_dump()}
