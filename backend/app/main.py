@@ -159,6 +159,7 @@ class ConsentIn(BaseModel): doctor_id:str; categories:list[str]; hours:int=Field
 class ConsultationIn(BaseModel): appointment_id:str; transcript:str=""; doctor_notes:str=""; final_note:str|None=None; complete:bool=False
 class CheckinIn(BaseModel): pain_score:int=Field(ge=1,le=10); temperature:float; medication_taken:bool; symptoms:str=""; notes:str=""
 class CVEventIn(BaseModel): room_id:str; event_type:Literal["FALL_RISK"]; severity:Literal["HIGH","CRITICAL","WARNING"]="HIGH"; confidence:float=Field(ge=0,le=1); timestamp:datetime|None=None
+class ReadIn(BaseModel): ids:list[str]=[]
 
 @app.get("/health")
 def health(): return {"status":"ok","demo_mode":True}
@@ -183,12 +184,34 @@ def labs(patient_id:str,user:DemoUser=Depends(current_user)):
 @app.get("/patients/{patient_id}/trends")
 def lab_trends(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn: return {"trends":trends(conn,patient_id),"conflicts":conflicts(conn,patient_id),"care_navigation":specialty_for(trends(conn,patient_id))}
-@app.get("/doctors")
-def doctor_directory(specialty:str|None=None):
+@app.get("/patients/{patient_id}/overview")
+def patient_overview(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
-        q="SELECT d.*,u.name,h.name hospital_name FROM doctors d JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id"; args=()
-        if specialty: q+=" WHERE d.specialty=?"; args=(specialty,)
-        return rows(conn.execute(q,args).fetchall())
+        p=one(conn,"SELECT p.*,u.name FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,))
+        if not p or (user.role=="PATIENT" and p["user_id"]!=user.id): raise HTTPException(403,"Profile unavailable")
+        upcoming=one(conn,"SELECT a.*,u.name doctor_name,d.specialty,h.name hospital_name,s.starts_at FROM appointments a JOIN doctors d ON d.id=a.doctor_id JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id JOIN availability s ON s.id=a.slot_id WHERE a.patient_id=? AND a.status NOT IN ('CANCELLED','COMPLETED') ORDER BY s.starts_at LIMIT 1",(patient_id,))
+        records=rows(conn.execute("SELECT type,title,record_date,category FROM medical_records WHERE patient_id=? ORDER BY record_date DESC LIMIT 4",(patient_id,)).fetchall())
+        return {"patient":{"id":patient_id,"name":p["name"],"insurance_plan":p["insurance_plan"],"allergies":json.loads(p["allergies_json"]),"conditions":json.loads(p["conditions_json"]),"medications":json.loads(p["medications_json"])},"upcoming_appointment":upcoming,"recent_activity":records,"insight_count":len(conflicts(conn,patient_id))+sum(1 for x in trends(conn,patient_id) if x["trend"]=="increasing")}
+@app.get("/patients/{patient_id}/lab-comparison")
+def lab_comparison(patient_id:str,from_date:str,to_date:str,user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        all_labs=rows(conn.execute("SELECT metric,value,unit,result_date,reference_range FROM lab_results WHERE patient_id=? ORDER BY result_date",(patient_id,)).fetchall()); result=[]
+        for metric in sorted({x["metric"] for x in all_labs}):
+            series=[x for x in all_labs if x["metric"]==metric]; old=max((x for x in series if x["result_date"]<=from_date),key=lambda x:x["result_date"],default=None); new=max((x for x in series if x["result_date"]<=to_date),key=lambda x:x["result_date"],default=None)
+            if old and new: result.append({"metric":metric,"from":old,"to":new,"change":round(new["value"]-old["value"],2),"direction":"up" if new["value"]>old["value"] else "down" if new["value"]<old["value"] else "same"})
+        changed=[x["metric"] for x in result if x["change"]]
+        return {"from_date":from_date,"to_date":to_date,"metrics":result,"explanation":f"{len(changed)} metrics changed between these tests. This comparison does not provide a diagnosis."}
+@app.get("/doctors")
+def doctor_directory(specialty:str|None=None,q:str|None=None,hospital_id:str|None=None,max_price:float|None=None):
+    with db() as conn:
+        sql="SELECT d.*,u.name,h.name hospital_name FROM doctors d JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id"; args=()
+        clauses=[]
+        if specialty: clauses.append("d.specialty=?"); args+=(specialty,)
+        if q: clauses.append("(u.name LIKE ? OR d.specialty LIKE ? OR h.name LIKE ?)"); args+=(f"%{q}%",f"%{q}%",f"%{q}%")
+        if hospital_id: clauses.append("d.hospital_id=?"); args+=(hospital_id,)
+        if max_price: clauses.append("d.price<=?"); args+=(max_price,)
+        if clauses: sql+=" WHERE "+" AND ".join(clauses)
+        return rows(conn.execute(sql,args).fetchall())
 @app.get("/doctors/{doctor_id}/availability")
 def doctor_slots(doctor_id:str):
     with db() as conn: return rows(conn.execute("SELECT * FROM availability WHERE doctor_id=? ORDER BY starts_at",(doctor_id,)).fetchall())
@@ -235,6 +258,15 @@ def queue(appointment_id:str,user:DemoUser=Depends(current_user)):
 def grant_consent(payload:ConsentIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
         p=one(conn,"SELECT id FROM patients WHERE user_id=?",(user.id,)); cid=uid("consent"); start=datetime.now(timezone.utc); expires=start+timedelta(hours=payload.hours); conn.execute("INSERT INTO consents VALUES(?,?,?,?,?,?,?,?,?)",(cid,p["id"],payload.doctor_id,json.dumps(payload.categories),start.isoformat(),expires.isoformat(),None,"ACTIVE",now())); audit(conn,user.id,"CONSENT_GRANTED","consent",cid,{"categories":payload.categories}); return {"id":cid,"expires_at":expires.isoformat(),"status":"ACTIVE"}
+@app.get("/consents")
+def list_consents(user:DemoUser=Depends(require("PATIENT"))):
+    with db() as conn:return rows(conn.execute("SELECT c.*,u.name doctor_name,d.specialty,h.name hospital_name FROM consents c JOIN doctors d ON d.id=c.doctor_id JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id JOIN patients p ON p.id=c.patient_id WHERE p.user_id=? ORDER BY c.created_at DESC",(user.id,)).fetchall())
+@app.post("/consents/{consent_id}/revoke")
+def revoke_consent(consent_id:str,user:DemoUser=Depends(require("PATIENT"))):
+    with db() as conn:
+        c=one(conn,"SELECT c.* FROM consents c JOIN patients p ON p.id=c.patient_id WHERE c.id=? AND p.user_id=?",(consent_id,user.id))
+        if not c: raise HTTPException(404,"Consent not found")
+        conn.execute("UPDATE consents SET status='REVOKED',revoked_at=? WHERE id=?",(now(),consent_id)); audit(conn,user.id,"CONSENT_REVOKED","consent",consent_id); return {"status":"REVOKED"}
 @app.get("/doctors/patients/{patient_id}/brief")
 def doctor_brief(patient_id:str,user:DemoUser=Depends(require("DOCTOR"))):
     with db() as conn:
@@ -257,10 +289,33 @@ def consultation(payload:ConsultationIn,user:DemoUser=Depends(require("DOCTOR"))
 @app.get("/hospitals/{hospital_id}/capacity")
 def hospital_capacity(hospital_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:return capacity(conn,hospital_id)
+@app.get("/hospitals/{hospital_id}/departments")
+def department_capacity(hospital_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:return rows(conn.execute("SELECT d.id,d.name,COUNT(b.id) total_beds,SUM(CASE WHEN b.status='OCCUPIED' THEN 1 ELSE 0 END) occupied,SUM(CASE WHEN b.status='AVAILABLE' THEN 1 ELSE 0 END) available FROM departments d LEFT JOIN beds b ON b.department_id=d.id WHERE d.hospital_id=? GROUP BY d.id,d.name",(hospital_id,)).fetchall())
+@app.get("/hospitals/{hospital_id}/beds")
+def bed_list(hospital_id:str,department_id:str|None=None,status_filter:str|None=None,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        q="SELECT b.*,d.name department_name,p.id patient_id,u.name patient_name,a.admitted_at,a.expected_discharge_at FROM beds b JOIN departments d ON d.id=b.department_id LEFT JOIN admissions a ON a.bed_id=b.id AND a.status!='DISCHARGED' LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN users u ON u.id=p.user_id WHERE b.hospital_id=?"; args=(hospital_id,)
+        if department_id: q+=" AND b.department_id=?"; args+=(department_id,)
+        if status_filter: q+=" AND b.status=?"; args+=(status_filter,)
+        return rows(conn.execute(q,args).fetchall())
+@app.get("/hospitals/{hospital_id}/flow")
+def patient_flow(hospital_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        result=rows(conn.execute("SELECT status,COUNT(*) count FROM admissions WHERE hospital_id=? GROUP BY status",(hospital_id,)).fetchall()); blocked=conn.execute("SELECT COUNT(*) FROM admissions a WHERE a.hospital_id=? AND EXISTS(SELECT 1 FROM discharge_blockers b WHERE b.admission_id=a.id AND b.status='OPEN')",(hospital_id,)).fetchone()[0]
+        return {"stages":result,"blocked":blocked}
+@app.get("/discharge-blockers")
+def blockers(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:return rows(conn.execute("SELECT b.*,a.patient_id,a.department_id,u.name patient_name,a.expected_discharge_at FROM discharge_blockers b JOIN admissions a ON a.id=b.admission_id JOIN patients p ON p.id=a.patient_id JOIN users u ON u.id=p.user_id ORDER BY b.created_at",).fetchall())
 @app.get("/hospitals/{hospital_id}/forecast")
 def forecast(hospital_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:
         cap=capacity(conn,hospital_id); usable=max(0,cap["expected_discharges"]-cap["delayed_discharges"]); future=cap["available"]+usable-cap["expected_incoming"]; return {"label":"capacity forecast","available_now":cap["available"],"expected_usable_discharges":usable,"expected_incoming":cap["expected_incoming"],"future_capacity":future,"predicted_shortage":max(0,-future),"method":"available + expected usable discharges - expected incoming"}
+@app.get("/hospitals/{hospital_id}/recommendations")
+def recommendations(hospital_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        cap=capacity(conn,hospital_id); data=rows(conn.execute("SELECT t.*,b.blocker_type,a.patient_id FROM tasks t JOIN discharge_blockers b ON b.id=t.blocker_id JOIN admissions a ON a.id=t.admission_id WHERE t.status!='COMPLETED' ORDER BY t.priority_score DESC",).fetchall())
+        return [{"task_id":x["id"],"problem":x["blocker_type"],"patient":x["patient_id"],"action":x["title"],"impact":x["impact"],"priority":x["priority"],"why":f"Capacity has only {cap['available']} available beds; resolving this discharge blocker may free one bed."} for x in data]
 @app.get("/tasks")
 def list_tasks(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:
@@ -280,7 +335,11 @@ def discharge(admission_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN")))
     with db() as conn:
         a=one(conn,"SELECT * FROM admissions WHERE id=?",(admission_id,)); blockers=conn.execute("SELECT COUNT(*) FROM discharge_blockers WHERE admission_id=? AND status='OPEN'",(admission_id,)).fetchone()[0]
         if not a or blockers or a["status"] not in ("READY_FOR_DISCHARGE","ACTIVE"): raise HTTPException(409,"Admission is not ready for discharge")
-        conn.execute("UPDATE admissions SET status='DISCHARGED' WHERE id=?",(admission_id,)); conn.execute("UPDATE beds SET status='AVAILABLE' WHERE id=?",(a["bed_id"],)); audit(conn,user.id,"PATIENT_DISCHARGED","admission",admission_id); return {"status":"DISCHARGED","bed_id":a["bed_id"]}
+        conn.execute("UPDATE admissions SET status='DISCHARGED' WHERE id=?",(admission_id,)); conn.execute("UPDATE beds SET status='CLEANING' WHERE id=?",(a["bed_id"],)); audit(conn,user.id,"PATIENT_DISCHARGED","admission",admission_id); return {"status":"DISCHARGED","bed_id":a["bed_id"],"bed_status":"CLEANING"}
+@app.post("/beds/{bed_id}/complete-cleaning")
+def complete_cleaning(bed_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:
+        conn.execute("UPDATE beds SET status='AVAILABLE' WHERE id=? AND status='CLEANING'",(bed_id,)); audit(conn,user.id,"BED_CLEANING_COMPLETED","bed",bed_id); return {"bed_id":bed_id,"status":"AVAILABLE"}
 @app.post("/post-discharge/{patient_id}",status_code=201)
 def checkin(patient_id:str,payload:CheckinIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
@@ -294,6 +353,19 @@ def cv_event(payload:CVEventIn,user:DemoUser=Depends(require("HOSPITAL_ADMIN","D
 @app.get("/notifications")
 def notifications(user:DemoUser=Depends(current_user)):
     with db() as conn:return rows(conn.execute("SELECT * FROM notifications WHERE user_id=? OR role=? ORDER BY created_at DESC",(user.id,user.role)).fetchall())
+@app.post("/notifications/read")
+def mark_read(payload:ReadIn,user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        if payload.ids: conn.executemany("UPDATE notifications SET read_at=? WHERE id=? AND (user_id=? OR role=?)",[(now(),item,user.id,user.role) for item in payload.ids])
+        else: conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? OR role=?",(now(),user.id,user.role))
+        return {"status":"ok"}
+@app.get("/safety/events")
+def safety_events(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    with db() as conn:return rows(conn.execute("SELECT * FROM cv_events ORDER BY occurred_at DESC",).fetchall())
+@app.post("/demo/reset")
+def reset_demo(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    if DB_PATH.exists(): DB_PATH.unlink()
+    seed(); return {"status":"reset","message":"Demo data restored."}
 @app.get("/audit")
 def audits(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:return rows(conn.execute("SELECT * FROM audit_events ORDER BY created_at DESC",).fetchall())

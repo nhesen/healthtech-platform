@@ -34,6 +34,9 @@ def test_discharge_and_cv_notification():
     before=c.get("/hospitals/hospital_caspian/capacity",headers=admin).json()["available"]
     assert c.post("/tasks/task_104/complete",headers=admin).status_code==200
     assert c.post("/admissions/admission_104/discharge",headers=admin).status_code==200
+    cleaning=c.get("/hospitals/hospital_caspian/capacity",headers=admin).json()["cleaning"]
+    assert cleaning==1
+    assert c.post("/beds/bed_104/complete-cleaning",headers=admin).status_code==200
     assert c.get("/hospitals/hospital_caspian/capacity",headers=admin).json()["available"]==before+1
     assert c.post("/cv-events",headers=admin,json={"room_id":"204","event_type":"FALL_RISK","severity":"HIGH","confidence":.92}).status_code==201
     assert any(n["type"]=="CRITICAL" for n in c.get("/notifications",headers=admin).json())
