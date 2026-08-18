@@ -1,7 +1,9 @@
 .venv/
 .venv-win/
+.runtime/
 backend/*.db
 backend/tests/*.db
+backend/uploads/
 __pycache__/
 *.pyc
 frontend/node_modules/

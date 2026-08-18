@@ -4,7 +4,7 @@ import json
 import os
 import re
 import sqlite3
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS safety_event_details (event_id TEXT PRIMARY KEY, pati
 CREATE TABLE IF NOT EXISTS safety_tasks (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, room_id TEXT NOT NULL, title TEXT NOT NULL, assigned_role TEXT NOT NULL, priority TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor_id TEXT, event_type TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, details_json TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS medical_documents (id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, uploaded_by TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL, storage_path TEXT NOT NULL, file_hash TEXT NOT NULL, document_type TEXT NOT NULL, processing_status TEXT NOT NULL, raw_text TEXT, extraction_json TEXT NOT NULL, confirmed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(patient_id,file_hash));
+CREATE INDEX IF NOT EXISTS idx_records_patient_date ON medical_records(patient_id,record_date);
+CREATE INDEX IF NOT EXISTS idx_labs_patient_metric_date ON lab_results(patient_id,metric,result_date);
+CREATE INDEX IF NOT EXISTS idx_appointments_patient_status ON appointments(patient_id,status);
+CREATE INDEX IF NOT EXISTS idx_consents_patient_doctor ON consents(patient_id,doctor_id,status,expires_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id,read_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_role_read ON notifications(role,read_at);
+CREATE INDEX IF NOT EXISTS idx_cv_room_time ON cv_events(room_id,occurred_at);
 """
 
 
@@ -88,7 +95,7 @@ def seed() -> None:
         conn.execute("INSERT INTO hospitals VALUES(?,?,?,?,?)", (hospital,"Caspian Medical Center","Baku",12,12))
         departments = [("dept_endo",hospital,"Endocrinology"),("dept_cardio",hospital,"Cardiology"),("dept_internal",hospital,"Internal Medicine"),("dept_surgery",hospital,"Surgery"),("dept_icu",hospital,"ICU")]
         conn.executemany("INSERT INTO departments VALUES(?,?,?)", departments)
-        conn.execute("INSERT INTO patients VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", ("patient_hasan","user_patient","2004-04-12","Male","+994 50 555 01 01","A+","Nigar Nurmammadova, +994 50 555 01 02","PLAN_PREMIUM",json.dumps([{"name":"Penicillin","reaction":"rash","recorded":"2024"}]),json.dumps(["Family history of type 2 diabetes"]),json.dumps([{"name":"Metformin","dosage":"500 mg"}])))
+        conn.execute("INSERT INTO patients VALUES(?,?,?,?,?,?,?,?,?,?,?)", ("patient_hasan","user_patient","2004-04-12","Male","+994 50 555 01 01","A+","Nigar Nurmammadova, +994 50 555 01 02","PLAN_PREMIUM",json.dumps([{"name":"Penicillin","reaction":"rash","recorded":"2024"}]),json.dumps(["Family history of type 2 diabetes"]),json.dumps([{"name":"Metformin","dosage":"500 mg"}])))
         doctors = [("doctor_leyla","user_doctor",hospital,"Endocrinology",12,4.9,60.0,"PLAN_BASIC,PLAN_PLUS,PLAN_PREMIUM"),("doctor_orxan",None,hospital,"Cardiology",10,4.8,70.0,"PLAN_PLUS,PLAN_PREMIUM"),("doctor_nigar",None,hospital,"Dermatology",8,4.7,50.0,"PLAN_BASIC,PLAN_PREMIUM"),("doctor_elvin",None,hospital,"Neurology",14,4.9,75.0,"PLAN_PREMIUM"),("doctor_samira",None,hospital,"Internal Medicine",9,4.8,55.0,"PLAN_BASIC,PLAN_PLUS,PLAN_PREMIUM"),("doctor_ramil",None,hospital,"Surgery",15,4.8,85.0,"PLAN_PLUS,PLAN_PREMIUM"),("doctor_aysu",None,hospital,"Pediatrics",7,4.7,45.0,"PLAN_BASIC,PLAN_PLUS"),("doctor_tural",None,hospital,"Radiology",11,4.8,65.0,"PLAN_PREMIUM")]
         for d in doctors:
             if not d[1]:
@@ -97,7 +104,7 @@ def seed() -> None:
         metrics = {"HbA1c":[("2024-02-22",5.4),("2025-03-10",5.8),("2026-08-18",6.3)],"Glucose":[("2025-03-10",94),("2026-08-18",108)],"Vitamin D":[("2025-03-10",19),("2026-08-18",28)],"Cholesterol":[("2026-08-18",188)],"Hemoglobin":[("2026-08-18",14.2)]}
         for metric, values in metrics.items():
             for dt,value in values:
-                record=uid("record"); conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(record,"patient_hasan","LAB_RESULT",f"{metric} result",dt,hospital,None,"LAB_RESULTS",json.dumps({"metric":metric,"value":value}),None,created)); conn.execute("INSERT INTO lab_results VALUES(?,?,?,?,?,?,?)",(uid("lab"),"patient_hasan",metric,value,"%" if metric=="HbA1c" else "mg/dL","4.0-5.6" if metric=="HbA1c" else "",dt,record))
+                record=uid("record"); conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(record,"patient_hasan","LAB_RESULT",f"{metric} result",dt,hospital,None,"LAB_RESULTS",json.dumps({"metric":metric,"value":value}),None,created)); conn.execute("INSERT INTO lab_results (id,patient_id,metric,value,unit,reference_range,result_date,record_id) VALUES(?,?,?,?,?,?,?,?)",(uid("lab"),"patient_hasan",metric,value,"%" if metric=="HbA1c" else "mg/dL","4.0-5.6" if metric=="HbA1c" else "",dt,record))
         conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(uid("record"),"patient_hasan","DOCTOR_VISIT","Annual check-up","2025-03-10",hospital,"doctor_samira","DOCTOR_NOTES",json.dumps({"note":"Lifestyle review completed"}),"",created))
         # Explicit conflict for the demo.
         conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(uid("record"),"patient_hasan","CHECKUP","External check-up","2026-08-01",hospital,None,"LAB_RESULTS",json.dumps({"allergies":"NONE"}),"No known allergies",created))
@@ -108,7 +115,7 @@ def seed() -> None:
         for i in range(200):
             dept=departments[i%len(departments)][0]; conn.execute("INSERT INTO beds VALUES(?,?,?,?,?)",(f"bed_{i+1}",hospital,dept,f"{200+i//2}","OCCUPIED" if i<195 else "AVAILABLE"))
         for num, blocker, role, minutes, ready in [(104,"LAB_REVIEW_PENDING","DOCTOR",35,1),(207,"PHARMACY_PENDING","HOSPITAL_ADMIN",55,1)]:
-            p=f"patient_{num}"; u=f"user_{num}"; conn.execute("INSERT INTO users VALUES(?,?,?,?,?,?)",(u,f"Patient #{num}",f"patient{num}@demo.az","PATIENT","{}",created)); conn.execute("INSERT INTO patients VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(p,u,"1970-01-01","Other","","","","PLAN_BASIC","[]","[]","[]")); bed=f"bed_{num}"; adm=f"admission_{num}"; conn.execute("INSERT INTO admissions VALUES(?,?,?,?,?,?,?,?,?)",(adm,p,hospital,"dept_internal",bed,created,(datetime.now(timezone.utc)+timedelta(hours=4)).isoformat(),ready,"ACTIVE")); bid=f"blocker_{num}"; conn.execute("INSERT INTO discharge_blockers VALUES(?,?,?,?,?,?,?,?)",(bid,adm,blocker,role,"OPEN",minutes,(datetime.now(timezone.utc)-timedelta(hours=2)).isoformat(),None)); score=80 if num==104 else 60; conn.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?,?)",(f"task_{num}","Review Lab Result" if num==104 else "Prepare Medication",adm,bid,role,"HIGH" if num==104 else "MEDIUM",score,"PENDING",f"Potentially frees 1 bed in ~{minutes} min",created,None))
+            p=f"patient_{num}"; u=f"user_{num}"; conn.execute("INSERT INTO users VALUES(?,?,?,?,?,?)",(u,f"Patient #{num}",f"patient{num}@demo.az","PATIENT","{}",created)); conn.execute("INSERT INTO patients VALUES(?,?,?,?,?,?,?,?,?,?,?)",(p,u,"1970-01-01","Other","","","","PLAN_BASIC","[]","[]","[]")); bed=f"bed_{num}"; adm=f"admission_{num}"; conn.execute("INSERT INTO admissions VALUES(?,?,?,?,?,?,?,?,?)",(adm,p,hospital,"dept_internal",bed,created,(datetime.now(timezone.utc)+timedelta(hours=4)).isoformat(),ready,"ACTIVE")); bid=f"blocker_{num}"; conn.execute("INSERT INTO discharge_blockers VALUES(?,?,?,?,?,?,?,?)",(bid,adm,blocker,role,"OPEN",minutes,(datetime.now(timezone.utc)-timedelta(hours=2)).isoformat(),None)); score=80 if num==104 else 60; conn.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?,?)",(f"task_{num}","Review Lab Result" if num==104 else "Prepare Medication",adm,bid,role,"HIGH" if num==104 else "MEDIUM",score,"PENDING",f"Potentially frees 1 bed in ~{minutes} min",created,None))
         notify(conn,user_id="user_patient",kind="INFO",message="Your health timeline is ready.")
 
 
@@ -131,6 +138,21 @@ def insurance(plan: str, specialty: str, price: float) -> dict:
 def active_consent(conn, patient_id: str, doctor_id: str) -> list[str]:
     c=one(conn,"SELECT categories_json FROM consents WHERE patient_id=? AND doctor_id=? AND status='ACTIVE' AND revoked_at IS NULL AND expires_at>? ORDER BY created_at DESC",(patient_id,doctor_id,now()))
     return json.loads(c["categories_json"]) if c else []
+def clinical_access(conn: sqlite3.Connection, patient_id: str, user: DemoUser, categories: tuple[str, ...] = ()) -> list[str]:
+    """Enforce patient ownership and category-scoped doctor consent; admins have no clinical access."""
+    patient_row=one(conn,"SELECT user_id FROM patients WHERE id=?",(patient_id,))
+    if not patient_row: raise HTTPException(404,"Patient not found")
+    if user.role=="PATIENT":
+        if patient_row["user_id"]!=user.id: raise HTTPException(403,"Only your clinical data is available")
+        return list(categories)
+    if user.role=="DOCTOR":
+        doctor=one(conn,"SELECT id FROM doctors WHERE user_id=?",(user.id,))
+        allowed=active_consent(conn,patient_id,doctor["id"]) if doctor else []
+        if categories and not any(category in allowed for category in categories):
+            raise HTTPException(403,"Active consent for this clinical category is required")
+        if not categories and not allowed: raise HTTPException(403,"Active patient consent is required")
+        return allowed
+    raise HTTPException(403,"Hospital administrators cannot access full clinical records")
 def trends(conn, patient_id: str) -> list[dict]:
     result=[]
     for metric in rows(conn.execute("SELECT DISTINCT metric FROM lab_results WHERE patient_id=?",(patient_id,)).fetchall()):
@@ -155,10 +177,13 @@ def priority_score(blocker: dict, cap: dict) -> float:
     return round(min(100,35 + min(age,180)/6 + (20 if cap["available"]<10 else 0) + (15 if blocker["estimated_minutes"]<=40 else 5)),1)
 
 
-app=FastAPI(title="HealthTech Backbone",version="0.1.0")
-app.add_middleware(CORSMiddleware,allow_origins=["http://localhost:3000"],allow_methods=["*"],allow_headers=["*"])
-@app.on_event("startup")
-def boot(): seed()
+@asynccontextmanager
+async def lifespan(_:FastAPI):
+    seed()
+    yield
+
+app=FastAPI(title="HealthTech Backbone",version="0.1.0",lifespan=lifespan)
+app.add_middleware(CORSMiddleware,allow_origins=os.getenv("CORS_ORIGINS","http://localhost:3000").split(","),allow_methods=["*"],allow_headers=["*"])
 
 class AppointmentIn(BaseModel): doctor_id:str; slot_id:str; reason:str="Endocrinology consultation"
 class RescheduleIn(BaseModel): slot_id:str
@@ -170,6 +195,8 @@ class CVEventIn(BaseModel): room_id:str; event_type:Literal["FALL_RISK","PATIENT
 class ReadIn(BaseModel): ids:list[str]=[]
 class AITextIn(BaseModel): patient_id:str|None=None; notes:str=""; missing:list[str]=[]; task_id:str|None=None
 class DocumentConfirmIn(BaseModel): results:list[dict[str,Any]]=[]; report_date:str|None=None; source_name:str|None=None
+class DocumentReviewIn(BaseModel): results:list[dict[str,Any]]; report_date:str|None=None; source_name:str|None=None
+class TaskUpdateIn(BaseModel): status:Literal["PENDING","IN_PROGRESS"]; assigned_role:str|None=None
 
 @app.get("/health")
 def health(): return {"status":"ok","demo_mode":True}
@@ -182,15 +209,25 @@ def accounts():
 def patient(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
         p=one(conn,"SELECT p.*,u.name,u.email FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,))
-    if not p: raise HTTPException(404,"Patient not found")
-    if user.role=="PATIENT" and p["user_id"]!=user.id: raise HTTPException(403,"Only your profile is available")
-    return p
+        allowed=clinical_access(conn,patient_id,user)
+        if user.role=="DOCTOR":
+            p["allergies_json"]=p["allergies_json"] if "DIAGNOSES" in allowed else "[]"
+            p["conditions_json"]=p["conditions_json"] if "DIAGNOSES" in allowed else "[]"
+            p["medications_json"]=p["medications_json"] if "MEDICATIONS" in allowed else "[]"
+        return p
 @app.get("/patients/{patient_id}/timeline")
 def timeline(patient_id:str,user:DemoUser=Depends(current_user)):
-    with db() as conn: return rows(conn.execute("SELECT * FROM medical_records WHERE patient_id=? ORDER BY record_date DESC",(patient_id,)).fetchall())
+    with db() as conn:
+        allowed=clinical_access(conn,patient_id,user)
+        if user.role=="DOCTOR":
+            placeholders=",".join("?" for _ in allowed)
+            return rows(conn.execute(f"SELECT * FROM medical_records WHERE patient_id=? AND category IN ({placeholders}) ORDER BY record_date DESC",(patient_id,*allowed)).fetchall())
+        return rows(conn.execute("SELECT * FROM medical_records WHERE patient_id=? ORDER BY record_date DESC",(patient_id,)).fetchall())
 @app.get("/patients/{patient_id}/lab-results")
 def labs(patient_id:str,user:DemoUser=Depends(current_user)):
-    with db() as conn: return rows(conn.execute("SELECT * FROM lab_results WHERE patient_id=? ORDER BY result_date DESC",(patient_id,)).fetchall())
+    with db() as conn:
+        clinical_access(conn,patient_id,user,("LAB_RESULTS",))
+        return rows(conn.execute("SELECT * FROM lab_results WHERE patient_id=? ORDER BY result_date DESC",(patient_id,)).fetchall())
 def document_access(conn, document:dict, user:DemoUser):
     if user.role=="PATIENT":
         if one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(document["patient_id"],user.id)):return
@@ -212,11 +249,11 @@ async def upload_document(file:UploadFile=File(...),patient_id:str="patient_hasa
         else: raise HTTPException(403,"Only patient or authorized doctor can upload")
         digest=file_hash(data); existing=one(conn,"SELECT id FROM medical_documents WHERE patient_id=? AND file_hash=?",(patient_id,digest))
         if existing: raise HTTPException(409,"This document appears to have already been uploaded.")
-        did=uid("doc"); safe_name=re.sub(r"[^A-Za-z0-9._-]","_",file.filename or "document"); target=UPLOAD_DIR/f"{did}_{safe_name}"; target.write_bytes(data); text=extract_text(data,file.content_type or ""); dtype,confidence=classify(text); parsed=parse_lab(text) if dtype=="LAB_REPORT" else {"results":[]}; parsed.update({"document_type":dtype,"confidence":confidence}); state="NEEDS_REVIEW" if parsed["results"] else "UPLOADED"; conn.execute("INSERT INTO medical_documents VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(did,patient_id,user.id,safe_name,file.content_type,len(data),str(target),digest,dtype,state,text,json.dumps(parsed),None,now(),now())); notify(conn,user_id=user.id,kind="INFO",message="Document processed. Review extracted information before confirming.",related_type="document",related_id=did); audit(conn,user.id,"DOCUMENT_UPLOADED","document",did,{"type":dtype}); return {"document_id":did,"status":state,"extraction":parsed}
+        did=uid("doc"); safe_name=re.sub(r"[^A-Za-z0-9._-]","_",file.filename or "document"); target=UPLOAD_DIR/f"{did}_{safe_name}"; target.write_bytes(data); text=extract_text(data,file.content_type or ""); dtype,confidence=classify(text); parsed=parse_lab(text) if dtype=="LAB_REPORT" else {"results":[]}; parsed.update({"document_type":dtype,"confidence":confidence}); state="NEEDS_REVIEW" if parsed["results"] else "UPLOADED"; stamp=now(); conn.execute("INSERT INTO medical_documents (id,patient_id,uploaded_by,filename,mime_type,size,storage_path,file_hash,document_type,processing_status,raw_text,extraction_json,confirmed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(did,patient_id,user.id,safe_name,file.content_type,len(data),str(target),digest,dtype,state,text,json.dumps(parsed),None,stamp,stamp)); notify(conn,user_id=user.id,kind="INFO",message="Document processed. Review extracted information before confirming.",related_type="document",related_id=did); audit(conn,user.id,"DOCUMENT_UPLOADED","document",did,{"type":dtype}); return {"document_id":did,"status":state,"extraction":parsed}
 @app.get("/documents")
 def documents(patient_id:str="patient_hasan",user:DemoUser=Depends(current_user)):
     with db() as conn:
-        if user.role=="PATIENT" and not one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(patient_id,user.id)):raise HTTPException(403,"Patient mismatch")
+        clinical_access(conn,patient_id,user,("LAB_RESULTS",))
         return rows(conn.execute("SELECT id,filename,document_type,processing_status,created_at,confirmed_at FROM medical_documents WHERE patient_id=? ORDER BY created_at DESC",(patient_id,)).fetchall())
 @app.get("/documents/{document_id}")
 def document_detail(document_id:str,user:DemoUser=Depends(current_user)):
@@ -224,30 +261,47 @@ def document_detail(document_id:str,user:DemoUser=Depends(current_user)):
         doc=one(conn,"SELECT * FROM medical_documents WHERE id=?",(document_id,));
         if not doc:raise HTTPException(404,"Document not found")
         document_access(conn,doc,user); return doc
+@app.patch("/documents/{document_id}/review")
+def review_document(document_id:str,payload:DocumentReviewIn,user:DemoUser=Depends(require("PATIENT"))):
+    with db() as conn:
+        doc=one(conn,"SELECT * FROM medical_documents WHERE id=?",(document_id,))
+        if not doc: raise HTTPException(404,"Document not found")
+        document_access(conn,doc,user)
+        if doc["processing_status"]=="CONFIRMED": raise HTTPException(409,"Confirmed documents cannot be edited")
+        extraction=json.loads(doc["extraction_json"]); extraction.update({"results":payload.results,"report_date":payload.report_date,"source_name":payload.source_name})
+        conn.execute("UPDATE medical_documents SET extraction_json=?,processing_status='NEEDS_REVIEW',updated_at=? WHERE id=?",(json.dumps(extraction),now(),document_id)); audit(conn,user.id,"DOCUMENT_REVIEWED","document",document_id,{"result_count":len(payload.results)})
+        return {"id":document_id,"status":"NEEDS_REVIEW","extraction":extraction}
 @app.post("/documents/{document_id}/confirm")
 def confirm_document(document_id:str,payload:DocumentConfirmIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
         doc=one(conn,"SELECT * FROM medical_documents WHERE id=?",(document_id,));
         if not doc:raise HTTPException(404,"Document not found")
-        document_access(conn,doc,user); extracted=json.loads(doc["extraction_json"]); results=payload.results or extracted.get("results",[]); report_date=payload.report_date or date.today().isoformat(); source=payload.source_name or "Uploaded document"; record=uid("record"); conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(record,doc["patient_id"],"LAB_RESULT",doc["filename"],report_date,None,None,"LAB_RESULTS",json.dumps({"source_document_id":document_id,"results":results}),doc["raw_text"],now()))
+        document_access(conn,doc,user)
+        if doc["processing_status"]=="CONFIRMED": raise HTTPException(409,"Document has already been confirmed")
+        extracted=json.loads(doc["extraction_json"]); results=payload.results or extracted.get("results",[])
+        if not results: raise HTTPException(422,"Add at least one reviewed lab result before confirming")
+        report_date=payload.report_date or extracted.get("report_date") or date.today().isoformat(); source=payload.source_name or extracted.get("source_name") or "Uploaded document"; record=uid("record"); conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)",(record,doc["patient_id"],"LAB_RESULT",doc["filename"],report_date,None,None,"LAB_RESULTS",json.dumps({"source_document_id":document_id,"source":source,"results":results}),doc["raw_text"],now()))
         for item in results:
             if not item.get("test_name") or item.get("value") is None:continue
-            conn.execute("INSERT INTO lab_results VALUES(?,?,?,?,?,?,?)",(uid("lab"),doc["patient_id"],item["test_name"],float(item["value"]),item.get("unit","") or "",item.get("reference_text","") or "",report_date,record))
+            conn.execute("INSERT INTO lab_results (id,patient_id,metric,value,unit,reference_range,result_date,record_id) VALUES(?,?,?,?,?,?,?,?)",(uid("lab"),doc["patient_id"],item["test_name"],float(item["value"]),item.get("unit","") or "",item.get("reference_text","") or "",report_date,record))
         conn.execute("UPDATE medical_documents SET processing_status='CONFIRMED',confirmed_at=?,updated_at=? WHERE id=?",(now(),now(),document_id)); notify(conn,user_id=user.id,kind="SUCCESS",message="Lab results added to your health timeline.",related_type="document",related_id=document_id); audit(conn,user.id,"DOCUMENT_CONFIRMED","document",document_id,{"result_count":len(results),"source":source}); return {"status":"CONFIRMED","record_id":record,"results_created":len(results)}
 @app.get("/patients/{patient_id}/trends")
 def lab_trends(patient_id:str,user:DemoUser=Depends(current_user)):
-    with db() as conn: return {"trends":trends(conn,patient_id),"conflicts":conflicts(conn,patient_id),"care_navigation":specialty_for(trends(conn,patient_id))}
+    with db() as conn:
+        clinical_access(conn,patient_id,user,("LAB_RESULTS",)); data=trends(conn,patient_id)
+        return {"trends":data,"conflicts":conflicts(conn,patient_id),"care_navigation":specialty_for(data)}
 @app.get("/patients/{patient_id}/overview")
-def patient_overview(patient_id:str,user:DemoUser=Depends(current_user)):
+def patient_overview(patient_id:str,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
         p=one(conn,"SELECT p.*,u.name FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,))
-        if not p or (user.role=="PATIENT" and p["user_id"]!=user.id): raise HTTPException(403,"Profile unavailable")
+        allowed=clinical_access(conn,patient_id,user)
         upcoming=one(conn,"SELECT a.*,u.name doctor_name,d.specialty,h.name hospital_name,s.starts_at FROM appointments a JOIN doctors d ON d.id=a.doctor_id JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id JOIN availability s ON s.id=a.slot_id WHERE a.patient_id=? AND a.status NOT IN ('CANCELLED','COMPLETED') ORDER BY s.starts_at LIMIT 1",(patient_id,))
         records=rows(conn.execute("SELECT type,title,record_date,category FROM medical_records WHERE patient_id=? ORDER BY record_date DESC LIMIT 4",(patient_id,)).fetchall())
         return {"patient":{"id":patient_id,"name":p["name"],"insurance_plan":p["insurance_plan"],"allergies":json.loads(p["allergies_json"]),"conditions":json.loads(p["conditions_json"]),"medications":json.loads(p["medications_json"])},"upcoming_appointment":upcoming,"recent_activity":records,"insight_count":len(conflicts(conn,patient_id))+sum(1 for x in trends(conn,patient_id) if x["trend"]=="increasing")}
 @app.get("/patients/{patient_id}/lab-comparison")
 def lab_comparison(patient_id:str,from_date:str,to_date:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
+        clinical_access(conn,patient_id,user,("LAB_RESULTS",))
         all_labs=rows(conn.execute("SELECT metric,value,unit,result_date,reference_range FROM lab_results WHERE patient_id=? ORDER BY result_date",(patient_id,)).fetchall()); result=[]
         for metric in sorted({x["metric"] for x in all_labs}):
             series=[x for x in all_labs if x["metric"]==metric]; old=max((x for x in series if x["result_date"]<=from_date),key=lambda x:x["result_date"],default=None); new=max((x for x in series if x["result_date"]<=to_date),key=lambda x:x["result_date"],default=None)
@@ -268,9 +322,18 @@ def doctor_directory(specialty:str|None=None,q:str|None=None,hospital_id:str|Non
 @app.get("/doctors/{doctor_id}/availability")
 def doctor_slots(doctor_id:str):
     with db() as conn: return rows(conn.execute("SELECT * FROM availability WHERE doctor_id=? ORDER BY starts_at",(doctor_id,)).fetchall())
-@app.get("/insurance/estimate")
-def insurance_estimate(patient_id:str,doctor_id:str):
+@app.get("/doctors/{doctor_id}")
+def doctor_profile(doctor_id:str):
     with db() as conn:
+        doctor=one(conn,"SELECT d.*,u.name,h.name hospital_name,h.city FROM doctors d JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id WHERE d.id=?",(doctor_id,))
+        if not doctor: raise HTTPException(404,"Doctor not found")
+        doctor["accepted_plans"]=doctor["accepted_plans"].split(",")
+        doctor["availability"]=rows(conn.execute("SELECT id,starts_at,ends_at,status FROM availability WHERE doctor_id=? ORDER BY starts_at",(doctor_id,)).fetchall())
+        return doctor
+@app.get("/insurance/estimate")
+def insurance_estimate(patient_id:str,doctor_id:str,user:DemoUser=Depends(require("PATIENT"))):
+    with db() as conn:
+        clinical_access(conn,patient_id,user)
         p=one(conn,"SELECT insurance_plan FROM patients WHERE id=?",(patient_id,)); d=one(conn,"SELECT specialty,price FROM doctors WHERE id=?",(doctor_id,))
         if not p or not d: raise HTTPException(404,"Patient or doctor not found")
         return insurance(p["insurance_plan"],d["specialty"],d["price"])
@@ -286,19 +349,23 @@ def list_appointments(user:DemoUser=Depends(current_user)):
     with db() as conn:
         if user.role=="PATIENT": q="SELECT a.*,u.name doctor_name,s.starts_at FROM appointments a JOIN patients p ON p.id=a.patient_id JOIN users u ON u.id=(SELECT user_id FROM doctors WHERE id=a.doctor_id) JOIN availability s ON s.id=a.slot_id WHERE p.user_id=?"; data=rows(conn.execute(q,(user.id,)).fetchall())
         elif user.role=="DOCTOR": data=rows(conn.execute("SELECT a.*,u.name patient_name,s.starts_at FROM appointments a JOIN doctors d ON d.id=a.doctor_id JOIN patients p ON p.id=a.patient_id JOIN users u ON u.id=p.user_id JOIN availability s ON s.id=a.slot_id WHERE d.user_id=?",(user.id,)).fetchall())
-        else: data=rows(conn.execute("SELECT * FROM appointments").fetchall())
+        else: data=rows(conn.execute("SELECT id,patient_id,doctor_id,slot_id,status,created_at FROM appointments").fetchall())
         return data
 @app.patch("/appointments/{appointment_id}/cancel")
 def cancel(appointment_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
         a=one(conn,"SELECT * FROM appointments WHERE id=?",(appointment_id,));
         if not a: raise HTTPException(404,"Appointment not found")
-        conn.execute("UPDATE appointments SET status='CANCELLED' WHERE id=?",(appointment_id,)); conn.execute("UPDATE availability SET status='AVAILABLE' WHERE id=?",(a["slot_id"],)); audit(conn,user.id,"APPOINTMENT_CANCELLED","appointment",appointment_id); return {"status":"CANCELLED"}
+        if user.role=="PATIENT" and not one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(a["patient_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
+        if user.role=="DOCTOR" and not one(conn,"SELECT id FROM doctors WHERE id=? AND user_id=?",(a["doctor_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
+        if a["status"]=="CANCELLED": return {"status":"CANCELLED"}
+        conn.execute("UPDATE appointments SET status='CANCELLED' WHERE id=?",(appointment_id,)); conn.execute("UPDATE availability SET status='AVAILABLE' WHERE id=?",(a["slot_id"],)); patient_user=one(conn,"SELECT user_id FROM patients WHERE id=?",(a["patient_id"],)); notify(conn,user_id=patient_user["user_id"],kind="INFO",message="Appointment cancelled.",related_type="appointment",related_id=appointment_id); audit(conn,user.id,"APPOINTMENT_CANCELLED","appointment",appointment_id); return {"status":"CANCELLED"}
 @app.patch("/appointments/{appointment_id}/status")
 def appointment_status(appointment_id:str,payload:AppointmentStatusIn,user:DemoUser=Depends(require("DOCTOR","HOSPITAL_ADMIN"))):
     with db() as conn:
         a=one(conn,"SELECT * FROM appointments WHERE id=?",(appointment_id,));
         if not a: raise HTTPException(404,"Appointment not found")
+        if user.role=="DOCTOR" and not one(conn,"SELECT id FROM doctors WHERE id=? AND user_id=?",(a["doctor_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
         conn.execute("UPDATE appointments SET status=? WHERE id=?",(payload.status,appointment_id)); patient_user=one(conn,"SELECT user_id FROM patients WHERE id=?",(a["patient_id"],));
         if payload.status in ("CHECKED_IN","WAITING","COMPLETED"): notify(conn,user_id=patient_user["user_id"],kind="INFO",message=f"Appointment status updated: {payload.status.replace('_',' ').title()}.",related_type="appointment",related_id=appointment_id)
         audit(conn,user.id,"APPOINTMENT_STATUS_UPDATED","appointment",appointment_id,{"status":payload.status}); return {"id":appointment_id,"status":payload.status}
@@ -307,18 +374,26 @@ def reschedule(appointment_id:str,payload:RescheduleIn,user:DemoUser=Depends(req
     with db() as conn:
         a=one(conn,"SELECT * FROM appointments WHERE id=?",(appointment_id,)); slot=one(conn,"SELECT * FROM availability WHERE id=?",(payload.slot_id,))
         if not a or not slot or slot["doctor_id"]!=a["doctor_id"]: raise HTTPException(404,"Appointment or slot not found")
+        if not one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(a["patient_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
         if slot["status"]!="AVAILABLE": raise HTTPException(409,"Slot is no longer available")
         conn.execute("UPDATE availability SET status='AVAILABLE' WHERE id=?",(a["slot_id"],)); conn.execute("UPDATE availability SET status='BOOKED' WHERE id=?",(payload.slot_id,)); conn.execute("UPDATE appointments SET slot_id=? WHERE id=?",(payload.slot_id,appointment_id)); notify(conn,user_id=user.id,kind="INFO",message="Appointment rescheduled.",related_type="appointment",related_id=appointment_id); audit(conn,user.id,"APPOINTMENT_RESCHEDULED","appointment",appointment_id); return {"status":"SCHEDULED","slot_id":payload.slot_id}
 @app.get("/appointments/{appointment_id}/queue")
 def queue(appointment_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
         a=one(conn,"SELECT a.*,s.starts_at FROM appointments a JOIN availability s ON s.id=a.slot_id WHERE a.id=?",(appointment_id,));
+        if not a: raise HTTPException(404,"Appointment not found")
+        if user.role=="PATIENT" and not one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(a["patient_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
+        if user.role=="DOCTOR" and not one(conn,"SELECT id FROM doctors WHERE id=? AND user_id=?",(a["doctor_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
+        if user.role=="HOSPITAL_ADMIN": raise HTTPException(403,"Queue access is limited to the patient and treating doctor")
         before=conn.execute("SELECT COUNT(*) FROM appointments a JOIN availability s ON s.id=a.slot_id WHERE a.doctor_id=? AND date(s.starts_at)=date(?) AND s.starts_at<? AND a.status NOT IN ('CANCELLED')",(a["doctor_id"],a["starts_at"],a["starts_at"])).fetchone()[0]
         return {"queue_position":before+1,"patients_before":before,"estimated_wait_minutes":before*AVERAGE_CONSULTATION_MINUTES}
 @app.post("/consents",status_code=201)
 def grant_consent(payload:ConsentIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
-        p=one(conn,"SELECT id FROM patients WHERE user_id=?",(user.id,)); cid=uid("consent"); start=datetime.now(timezone.utc); expires=start+timedelta(hours=payload.hours); conn.execute("INSERT INTO consents VALUES(?,?,?,?,?,?,?,?,?)",(cid,p["id"],payload.doctor_id,json.dumps(payload.categories),start.isoformat(),expires.isoformat(),None,"ACTIVE",now())); audit(conn,user.id,"CONSENT_GRANTED","consent",cid,{"categories":payload.categories}); return {"id":cid,"expires_at":expires.isoformat(),"status":"ACTIVE"}
+        valid={"LAB_RESULTS","MEDICATIONS","DIAGNOSES","DOCTOR_NOTES","MENTAL_HEALTH","DERMATOLOGY","DISCHARGE_RECORDS"}
+        if not payload.categories or any(x not in valid for x in payload.categories): raise HTTPException(422,"Select one or more valid consent categories")
+        if not one(conn,"SELECT id FROM doctors WHERE id=?",(payload.doctor_id,)): raise HTTPException(404,"Doctor not found")
+        p=one(conn,"SELECT id FROM patients WHERE user_id=?",(user.id,)); cid=uid("consent"); start=datetime.now(timezone.utc); expires=start+timedelta(hours=payload.hours); conn.execute("INSERT INTO consents VALUES(?,?,?,?,?,?,?,?,?)",(cid,p["id"],payload.doctor_id,json.dumps(sorted(set(payload.categories))),start.isoformat(),expires.isoformat(),None,"ACTIVE",now())); notify(conn,user_id=user.id,kind="SUCCESS",message="Medical record access granted.",related_type="consent",related_id=cid); audit(conn,user.id,"CONSENT_GRANTED","consent",cid,{"categories":payload.categories}); return {"id":cid,"expires_at":expires.isoformat(),"status":"ACTIVE"}
 @app.get("/consents")
 def list_consents(user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:return rows(conn.execute("SELECT c.*,u.name doctor_name,d.specialty,h.name hospital_name FROM consents c JOIN doctors d ON d.id=c.doctor_id JOIN users u ON u.id=d.user_id JOIN hospitals h ON h.id=d.hospital_id JOIN patients p ON p.id=c.patient_id WHERE p.user_id=? ORDER BY c.created_at DESC",(user.id,)).fetchall())
@@ -327,20 +402,26 @@ def revoke_consent(consent_id:str,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
         c=one(conn,"SELECT c.* FROM consents c JOIN patients p ON p.id=c.patient_id WHERE c.id=? AND p.user_id=?",(consent_id,user.id))
         if not c: raise HTTPException(404,"Consent not found")
-        conn.execute("UPDATE consents SET status='REVOKED',revoked_at=? WHERE id=?",(now(),consent_id)); audit(conn,user.id,"CONSENT_REVOKED","consent",consent_id); return {"status":"REVOKED"}
+        conn.execute("UPDATE consents SET status='REVOKED',revoked_at=? WHERE id=?",(now(),consent_id)); notify(conn,user_id=user.id,kind="INFO",message="Medical record access revoked.",related_type="consent",related_id=consent_id); audit(conn,user.id,"CONSENT_REVOKED","consent",consent_id); return {"status":"REVOKED"}
+@app.get("/privacy-history")
+def privacy_history(user:DemoUser=Depends(require("PATIENT"))):
+    with db() as conn:
+        patient_row=one(conn,"SELECT id FROM patients WHERE user_id=?",(user.id,))
+        return rows(conn.execute("SELECT a.id,a.event_type,a.details_json,a.created_at,u.name actor_name,u.role actor_role FROM audit_events a LEFT JOIN users u ON u.id=a.actor_id WHERE a.entity_type='patient' AND a.entity_id=? ORDER BY a.created_at DESC",(patient_row["id"],)).fetchall())
 @app.get("/doctors/patients/{patient_id}/brief")
 def doctor_brief(patient_id:str,user:DemoUser=Depends(require("DOCTOR"))):
     with db() as conn:
         d=one(conn,"SELECT * FROM doctors WHERE user_id=?",(user.id,)); allowed=active_consent(conn,patient_id,d["id"])
         if not allowed: raise HTTPException(403,"No active patient consent")
-        p=one(conn,"SELECT p.*,u.name FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,)); data=trends(conn,patient_id); relevant=[x for x in data if x["metric"] in ("HbA1c","Glucose")] if d["specialty"]=="Endocrinology" else data; records=rows(conn.execute("SELECT * FROM medical_records WHERE patient_id=? AND category IN (%s) ORDER BY record_date DESC" % ",".join("?"*len(allowed)),(patient_id,*allowed)).fetchall()); audit(conn,user.id,"DOCTOR_VIEWED_RECORD","patient",patient_id,{"categories":allowed})
-        context={"relevant_metrics":relevant,"medications":json.loads(p["medications_json"]) if "MEDICATIONS" in allowed else [],"allergies":json.loads(p["allergies_json"])}; ai=ai_service.generate("patient_brief",context)
-        return {"patient":{"id":patient_id,"name":p["name"],"dob":p["dob"]},"reason_for_visit":"Endocrinology consultation","allowed_categories":allowed,"important_history":[r["title"] for r in records],"warnings":conflicts(conn,patient_id),**ai.content,"ai":ai.model_dump()}
+        p=one(conn,"SELECT p.*,u.name FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,)); data=trends(conn,patient_id) if "LAB_RESULTS" in allowed else []; relevant=[x for x in data if x["metric"] in ("HbA1c","Glucose")] if d["specialty"]=="Endocrinology" else data; records=rows(conn.execute("SELECT * FROM medical_records WHERE patient_id=? AND category IN (%s) ORDER BY record_date DESC" % ",".join("?"*len(allowed)),(patient_id,*allowed)).fetchall()); audit(conn,user.id,"DOCTOR_VIEWED_RECORD","patient",patient_id,{"categories":allowed})
+        visible_conflicts=conflicts(conn,patient_id) if "LAB_RESULTS" in allowed and "DIAGNOSES" in allowed else []; context={"relevant_metrics":relevant,"medications":json.loads(p["medications_json"]) if "MEDICATIONS" in allowed else [],"allergies":json.loads(p["allergies_json"]) if "DIAGNOSES" in allowed else []}; ai=ai_service.generate("patient_brief",context)
+        return {"patient":{"id":patient_id,"name":p["name"],"dob":p["dob"]},"reason_for_visit":"Endocrinology consultation","allowed_categories":allowed,"important_history":[r["title"] for r in records],"warnings":visible_conflicts,**ai.content,"ai":ai.model_dump()}
 @app.post("/consultations",status_code=201)
 def consultation(payload:ConsultationIn,user:DemoUser=Depends(require("DOCTOR"))):
     with db() as conn:
         a=one(conn,"SELECT * FROM appointments WHERE id=?",(payload.appointment_id,)); d=one(conn,"SELECT id FROM doctors WHERE user_id=?",(user.id,));
         if not a or a["doctor_id"]!=d["id"]: raise HTTPException(403,"Appointment unavailable")
+        if not active_consent(conn,a["patient_id"],d["id"]): raise HTTPException(403,"Active patient consent is required")
         missing=[]; text=(payload.transcript+" "+payload.doctor_notes).lower()
         if "medication" in text and not any(x in text for x in ["mg","ml","dose","dosage"]): missing.append("Medication dosage missing")
         if "allergy" in text and not any(x in text for x in ["rash","reaction","anaphyl"]): missing.append("Allergy reaction not documented")
@@ -385,6 +466,12 @@ def list_tasks(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
         data=rows(conn.execute("SELECT t.*,b.blocker_type,b.created_at blocker_created_at,a.patient_id FROM tasks t JOIN discharge_blockers b ON b.id=t.blocker_id JOIN admissions a ON a.id=t.admission_id WHERE t.status!='COMPLETED' ORDER BY t.priority_score DESC").fetchall()); cap=capacity(conn,"hospital_caspian")
         for t in data: t["priority_score"]=priority_score({"created_at":t["blocker_created_at"],"estimated_minutes":one(conn,"SELECT estimated_minutes FROM discharge_blockers WHERE id=?",(t["blocker_id"],))["estimated_minutes"]},cap)
         return data
+@app.patch("/tasks/{task_id}")
+def update_task(task_id:str,payload:TaskUpdateIn,user:DemoUser=Depends(require("HOSPITAL_ADMIN","DOCTOR"))):
+    with db() as conn:
+        task=one(conn,"SELECT * FROM tasks WHERE id=?",(task_id,))
+        if not task: raise HTTPException(404,"Task not found")
+        conn.execute("UPDATE tasks SET status=?,assigned_role=COALESCE(?,assigned_role) WHERE id=?",(payload.status,payload.assigned_role,task_id)); audit(conn,user.id,"HOSPITAL_TASK_UPDATED","task",task_id,{"status":payload.status,"assigned_role":payload.assigned_role}); return {"id":task_id,"status":payload.status,"assigned_role":payload.assigned_role or task["assigned_role"]}
 @app.post("/tasks/{task_id}/complete")
 def complete_task(task_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN","DOCTOR"))):
     with db() as conn:
@@ -406,7 +493,8 @@ def complete_cleaning(bed_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN")
 @app.post("/post-discharge/{patient_id}",status_code=201)
 def checkin(patient_id:str,payload:CheckinIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
-        conn.execute("INSERT INTO checkins VALUES(?,?,?,?,?,?,?,?,?)",(uid("checkin"),patient_id,None,date.today().isoformat(),payload.pain_score,payload.temperature,int(payload.medication_taken),payload.symptoms,payload.notes)); history=rows(conn.execute("SELECT * FROM checkins WHERE patient_id=? ORDER BY checkin_date DESC LIMIT 3",(patient_id,)).fetchall()); worsening=len(history)>=2 and (history[0]["pain_score"]>history[-1]["pain_score"] or history[0]["temperature"]>=38)
+        clinical_access(conn,patient_id,user)
+        conn.execute("INSERT INTO checkins VALUES(?,?,?,?,?,?,?,?,?)",(uid("checkin"),patient_id,None,date.today().isoformat(),payload.pain_score,payload.temperature,int(payload.medication_taken),payload.symptoms,payload.notes)); history=rows(conn.execute("SELECT * FROM checkins WHERE patient_id=? ORDER BY checkin_date DESC,rowid DESC LIMIT 3",(patient_id,)).fetchall()); worsening=len(history)>=2 and (history[0]["pain_score"]>history[-1]["pain_score"] or history[0]["temperature"]>=38)
         if worsening: notify(conn,role="DOCTOR",kind="WARNING",message="Patient post-discharge trend requires review.",related_type="patient",related_id=patient_id)
         return {"trend":"worsening" if worsening else "stable","requires_review":worsening}
 @app.post("/cv-events",status_code=201)
@@ -431,12 +519,13 @@ def mark_read(payload:ReadIn,user:DemoUser=Depends(current_user)):
         if payload.ids: conn.executemany("UPDATE notifications SET read_at=? WHERE id=? AND (user_id=? OR role=?)",[(now(),item,user.id,user.role) for item in payload.ids])
         else: conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? OR role=?",(now(),user.id,user.role))
         return {"status":"ok"}
+@app.patch("/notifications/read-all")
+def mark_all_read(user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? OR role=?",(now(),user.id,user.role)); return {"status":"ok"}
 @app.patch("/notifications/{notification_id}/read")
 def mark_one_read(notification_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn: conn.execute("UPDATE notifications SET read_at=? WHERE id=? AND (user_id=? OR role=?)",(now(),notification_id,user.id,user.role)); return {"id":notification_id,"status":"read"}
-@app.patch("/notifications/read-all")
-def mark_all_read(user:DemoUser=Depends(current_user)):
-    with db() as conn: conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? OR role=?",(now(),user.id,user.role)); return {"status":"ok"}
 @app.get("/safety/events")
 def safety_events(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:return rows(conn.execute("SELECT e.*,d.patient_state,d.previous_state,d.status,d.acknowledged_at,d.resolved_at FROM cv_events e LEFT JOIN safety_event_details d ON d.event_id=e.id ORDER BY e.occurred_at DESC",).fetchall())
@@ -449,6 +538,8 @@ def send_nurse(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:
         event=one(conn,"SELECT * FROM cv_events WHERE id=?",(event_id,));
         if not event: raise HTTPException(404,"Safety event not found")
+        existing=one(conn,"SELECT id,status FROM safety_tasks WHERE event_id=? AND status!='COMPLETED'",(event_id,))
+        if existing: return {"id":existing["id"],"status":existing["status"],"deduplicated":True}
         task_id=uid("safety_task"); conn.execute("INSERT INTO safety_tasks VALUES(?,?,?,?,?,?,?,?,?)",(task_id,event_id,event["room_id"],f"Assist Patient — Room {event['room_id']}","NURSE","CRITICAL","PENDING",now(),None)); notify(conn,role="HOSPITAL_ADMIN",kind="TASK",message=f"Nurse assistance task created for Room {event['room_id']}.",related_type="safety_task",related_id=task_id); audit(conn,user.id,"NURSE_TASK_CREATED","safety_task",task_id); return {"id":task_id,"status":"PENDING"}
 @app.patch("/cv-events/{event_id}/resolve")
 def resolve_event(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
@@ -456,6 +547,7 @@ def resolve_event(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN")))
         conn.execute("UPDATE safety_event_details SET status='RESOLVED',resolved_at=? WHERE event_id=?",(now(),event_id)); audit(conn,user.id,"CV_EVENT_RESOLVED","cv_event",event_id); return {"id":event_id,"status":"RESOLVED"}
 @app.post("/demo/reset")
 def reset_demo(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    if os.getenv("DEMO_MODE","true").lower() not in {"1","true","yes"}: raise HTTPException(404,"Not found")
     if DB_PATH.exists(): DB_PATH.unlink()
     seed(); return {"status":"reset","message":"Demo data restored."}
 @app.get("/audit")
@@ -464,17 +556,18 @@ def audits(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
 @app.get("/ai/lab-explanation/{patient_id}")
 def ai_explain(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
+        clinical_access(conn,patient_id,user,("LAB_RESULTS",))
         data=trends(conn,patient_id); target=next((x for x in data if x["metric"]=="HbA1c"),data[0] if data else None)
         if not target: raise HTTPException(404,"No trends available")
         result=ai_service.generate("lab_explanation",{"trend":target}); return {"data":target,"ai":result.model_dump()}
 @app.post("/ai/specialty-recommendation")
 def ai_specialty(payload:AITextIn,user:DemoUser=Depends(current_user)):
     with db() as conn:
-        data=trends(conn,payload.patient_id or "patient_hasan"); deterministic=specialty_for(data); result=ai_service.generate("specialty",{"specialty":deterministic["suggested_specialty"],"reason":deterministic["reason"]}); return {"deterministic":deterministic,"ai":result.model_dump()}
+        patient_id=payload.patient_id or "patient_hasan"; clinical_access(conn,patient_id,user,("LAB_RESULTS",)); data=trends(conn,patient_id); deterministic=specialty_for(data); result=ai_service.generate("specialty",{"specialty":deterministic["suggested_specialty"],"reason":deterministic["reason"]}); return {"deterministic":deterministic,"ai":result.model_dump()}
 @app.post("/ai/record-conflict-explanation")
 def ai_conflict(payload:AITextIn,user:DemoUser=Depends(current_user)):
     with db() as conn:
-        found=conflicts(conn,payload.patient_id or "patient_hasan"); return {"conflicts":found,"ai":ai_service.generate("record_conflict",{"conflicts":found}).model_dump()}
+        patient_id=payload.patient_id or "patient_hasan"; clinical_access(conn,patient_id,user,("LAB_RESULTS",)); found=conflicts(conn,patient_id); return {"conflicts":found,"ai":ai_service.generate("record_conflict",{"conflicts":found}).model_dump()}
 @app.post("/ai/post-discharge-summary")
 def ai_post_discharge(payload:AITextIn,user:DemoUser=Depends(current_user)):
     return {"ai":ai_service.generate("post_discharge",{}).model_dump()}

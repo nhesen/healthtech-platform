@@ -34,9 +34,11 @@ class MockAIProvider:
     def generate(self, feature: str, context: dict[str, Any]) -> dict[str, Any]:
         if feature == "patient_brief":
             metrics = context.get("relevant_metrics", [])
+            hba = next((x for x in metrics if x.get("metric") == "HbA1c"), None)
+            summary = f"Patient presents for review. HbA1c changed from {hba.get('previous')} to {hba.get('current')}; clinician review is required." if hba else "Patient presents for review. No consented lab trend was supplied to the AI service."
             return BriefContent(
-                summary="Patient presents for endocrinology review following a persistent upward HbA1c trend. This is decision support and requires clinician review.",
-                important_history=["HbA1c increased from 5.4 to 6.3 between 2024 and 2026"], relevant_metrics=metrics,
+                summary=summary,
+                important_history=[f"HbA1c changed from {hba.get('previous')} to {hba.get('current')}"] if hba else [], relevant_metrics=metrics,
                 medications=context.get("medications", []), allergies=context.get("allergies", []),
                 warnings=["Penicillin allergy recorded in 2024"] if context.get("allergies") else [],
                 suggested_review_points=["Review metabolic trend and current medication details."]

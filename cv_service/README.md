@@ -7,4 +7,4 @@ python run_demo.py --simulate
 python run_demo.py --video videos/fall_risk_demo.mp4
 ```
 
-`--video` currently uses the explainable fallback state sequence when an optional pose model is not installed. Install Ultralytics later to replace `classify_frame` without changing the backend event contract.
+For real video/camera inference, install `requirements-vision.txt`. The adapter uses YOLO Pose keypoints and explainable body geometry; it never performs face or identity recognition. Stable-frame confirmation, cooldown, and backend deduplication prevent one-frame alert spam. If the optional model is unavailable, video mode fails over to the deterministic demo sequence without breaking the safety workflow.

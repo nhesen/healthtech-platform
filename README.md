@@ -1,161 +1,133 @@
 # HealthTech Platform
 
-> A connected HealthTech MVP that helps patients understand their health history, helps doctors prepare for consultations, and helps hospitals act on capacity bottlenecks.
+A demo-ready healthcare journey for patients, doctors, and hospital operations. The app uses fully synthetic Azerbaijani-style data and is decision support only: it does not diagnose conditions or replace clinical judgment.
 
-Built for a 48-hour hackathon with synthetic Azerbaijani healthcare data. This product is a clinical support and care-navigation tool — it does **not** diagnose conditions or replace clinical judgment.
+## What works
 
-## The problem
+- Patient health profile, database-backed timeline, repeated lab measurements, trends, record conflicts, and deterministic specialty navigation
+- Doctor directory, availability, AZN insurance estimates, booking, rescheduling, cancellation, and queue calculation
+- Category-based consent with expiry/revocation, privacy history, consent-filtered doctor brief, and doctor-approved consultation records
+- Post-discharge check-ins with worsening-state alerts
+- 200-bed hospital command center, discharge blockers, task start/completion, discharge, cleaning, and capacity recalculation
+- Central AI provider abstraction with a deterministic no-key fallback
+- Fall-risk event ingestion, cooldown deduplication, notifications, nurse tasks, acknowledgement, and resolution
+- Polling-based live updates for dashboards, tasks, safety events, queue data, and notifications
+- PDF/JPG/PNG upload, hash deduplication, PDF text extraction, lab classification/parsing, editable review, confirmation, timeline linking, and trend updates
+- Demo reset endpoint and a real synthetic lab PDF at `backend/demo_documents/hasan_lab_report.pdf`
 
-Healthcare journeys are fragmented. Patients struggle to interpret records and access appropriate care, doctors need relevant clinical context quickly, and hospitals need to turn operational bottlenecks into clear actions.
-
-## Our solution
-
-HealthTech brings three connected experiences into one system:
-
-- **Patient app** — health timeline, lab comparisons, care navigation, appointment booking, insurance estimates, and consent controls.
-- **Doctor panel** — consent-aware patient history, AI-generated patient briefs, structured consultation notes, and missing-information alerts.
-- **Hospital command center** — bed capacity visibility, discharge blockers, priority workflows, and operational notifications.
-
-An optional patient-safety module demonstrates a fall-risk event from a prepared room video and notifies hospital staff.
-
-## Demo story
+## Architecture
 
 ```text
-New HbA1c result
-→ trend detected
-→ endocrinology recommendation
-→ insurance-aware appointment booking
-→ time-limited record access
-→ doctor receives AI patient brief
-→ consultation adds a new timeline record
+Next.js 15 / React / TypeScript / Tailwind
+                    |
+                    v
+FastAPI modular MVP (RBAC + domain APIs + deterministic engines)
+          |                         |
+          v                         v
+Local SQLite database        Central AI adapter
+for hackathon demo           live provider -> safe fallback
 
-Capacity risk
-→ discharge blocker identified
-→ doctor review task prioritized
-→ task completed
-→ discharge confirmed
-→ bed availability recalculated
+Separate Python CV module -> POST /cv-events
 ```
 
-## Core capabilities
+SQLite and header-based demo authentication are intentional local-MVP choices. The domain API boundaries can be moved to PostgreSQL/Supabase Auth after the hackathon without changing the frontend workflows.
 
-### Patient
+## Run locally
 
-- Personal medical timeline for labs, visits, medication, diagnoses, and documents
-- Lab trend comparison and record-conflict warnings
-- Specialist navigation without autonomous diagnosis
-- Doctor search, availability, booking, rescheduling, cancellation, and queue estimate
-- Mock insurance coverage and AZN payment calculation
-- Category-based and time-limited record permissions
-- Post-discharge health check-ins and review alerts
+Use official CPython 3.11+ (not an MSYS Python build) and Node.js 20+.
 
-### Doctor
+Backend, from the repository root in PowerShell:
 
-- Appointment and patient overview
-- Specialty-relevant AI patient brief
-- Permission-filtered medical timeline
-- Consultation note drafting with doctor approval
-- Missing-information prompts
-
-### Hospital admin
-
-- Bed occupancy and department capacity dashboard
-- Expected-discharge and capacity-risk forecast
-- Discharge blocker tracking
-- Prioritized operational tasks with expected impact
-- In-app alerts and safety-event monitoring
-
-## Safety and privacy principles
-
-- AI never makes a final diagnosis.
-- Doctors retain final clinical authority.
-- Patient consent is enforced by the backend for record access.
-- All demo data is fully synthetic.
-- AI output is labelled, source-aware where possible, and requires review before clinical use.
-
-## Planned architecture
-
-```text
-Next.js + React + TypeScript + Tailwind CSS
-                  │
-                  ▼
-             FastAPI backend
-      ┌───────────┼───────────┐
-      ▼           ▼           ▼
-Supabase Auth  PostgreSQL  AI provider adapter
-                               └─ deterministic fallback
+```powershell
+python -m venv .venv-win
+.\.venv-win\Scripts\python.exe -m pip install -r backend\requirements.txt
+$env:PYTHONPATH="backend"
+.\.venv-win\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-The MVP uses a modular monolith: one frontend, one FastAPI backend, and one PostgreSQL database. The AI and computer-vision integrations are isolated behind provider interfaces so they can be upgraded later.
+Frontend, in a second terminal:
 
-## Tech stack
-
-| Area | Technology |
-|---|---|
-| Frontend | Next.js, React, TypeScript, Tailwind CSS |
-| Backend | Python, FastAPI, Pydantic |
-| Database & authentication | PostgreSQL, Supabase |
-| AI | External LLM provider with deterministic fallback responses |
-| Computer vision | Python, YOLO / pose estimation, prepared-video first |
-| Charts | Recharts |
-| Icons | Lucide React |
-| Deployment | Vercel, Railway or Render, Supabase |
-
-## Repository structure
-
-```text
-healthtech-platform/
-├─ frontend/                 # Next.js application
-├─ backend/                  # FastAPI modular monolith
-│  ├─ app/
-│  │  ├─ api/                # REST route groups
-│  │  ├─ core/               # Settings, security, RBAC
-│  │  ├─ models/             # Database models
-│  │  ├─ schemas/            # Pydantic schemas
-│  │  ├─ services/           # Domain and business logic
-│  │  └─ ai/                 # Provider abstraction + fallbacks
-├─ cv/                       # Optional patient-safety demo module
-├─ docs/                     # Architecture and demo materials
-└─ README.md
-```
-
-## Local development
-
-Use a standard CPython 3.11+ installation (the official Python installer, not an MSYS Python build) and Node.js 20+.
-
-```bash
-# Terminal 1 — API
-cd backend
-python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt
-.venv/Scripts/uvicorn app.main:app --reload --port 8000
-
-# Terminal 2 — frontend
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The frontend targets `http://localhost:8000` by default. The backend creates and seeds a local SQLite database automatically on first start; use `X-Demo-User` with one of the demo emails to select a role when calling APIs directly.
+Open `http://localhost:3000`. API documentation is at `http://localhost:8000/docs`.
 
-Run the backend critical-path tests with:
+Optional environment variables:
 
-```bash
-cd backend
-pytest
+```powershell
+$env:NEXT_PUBLIC_API_URL="http://localhost:8000"
+$env:CORS_ORIGINS="http://localhost:3000"
+$env:AI_PROVIDER="mock"  # use openai only with a server-side AI_API_KEY
+$env:DEMO_MODE="true"
 ```
 
-## Roadmap
+## Tests and build
 
-- [x] Product definition and MVP scope
-- [x] System architecture and UI/UX design
-- [ ] Patient experience
-- [ ] Doctor experience
-- [ ] Hospital command center
-- [ ] AI provider and demo fallbacks
-- [ ] Patient-safety video scenario
-- [ ] Cloud deployment and local demo instructions
+```powershell
+$env:PYTHONPATH="backend"
+.\.venv-win\Scripts\python.exe -m pytest backend\tests -q
 
-## License
+$env:PYTHONPATH="cv_service"
+.\.venv-win\Scripts\python.exe -m pytest cv_service\tests -q
 
-This repository is currently intended for hackathon development. License selection is pending.
+cd frontend
+npm run build
+```
+
+## CV safety demo
+
+Start the backend, then run from the repository root:
+
+```powershell
+$env:PYTHONPATH="cv_service"
+.\.venv-win\Scripts\python.exe cv_service\run_demo.py --simulate
+```
+
+The simulator performs the stabilized `LYING -> SITTING -> STANDING` transition and sends the real fall-risk event to the backend. Video/camera modes remain extension points and fail safely when no pose model is installed.
+
+Optional real YOLO Pose video mode:
+
+```powershell
+.\.venv-win\Scripts\python.exe -m pip install -r cv_service\requirements-vision.txt
+$env:PYTHONPATH="cv_service"
+.\.venv-win\Scripts\python.exe cv_service\run_demo.py --video path\to\prepared-demo.mp4
+```
+
+## Demo accounts
+
+| Role | Demo identity |
+|---|---|
+| Patient | `patient@demo.az` |
+| Doctor | `doctor@demo.az` |
+| Hospital admin | `admin@demo.az` |
+
+The frontend role switcher sets these demo identities. Direct API requests use the `X-Demo-User` header.
+
+## Reset demo data
+
+The reset endpoint is available only while `DEMO_MODE=true`:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/demo/reset -Headers @{"X-Demo-User"="admin@demo.az"}
+```
+
+It restores Hasan's health history, Dr. Leyla, appointments and slots, consent, notifications, 195/200 occupancy, Patient #104's blocker/task, and Room 204's stable safety state.
+
+## Suggested 3–5 minute demo
+
+1. Patient: open **My Health**, show HbA1c `5.4 -> 5.8 -> 6.3`, the conflict warning, AI-safe explanation, and Endocrinology navigation.
+2. Patient: open **Appointments**, select Dr. Leyla, show the insurance estimate, and book an available slot. Open **Permissions** and grant 72-hour access.
+3. Doctor: switch role, open **Consultations**, select Hasan, show the consent-filtered brief, enter a final note, and approve it. Return to the patient timeline to show the saved record.
+4. Patient: open **Documents**, upload `backend/demo_documents/hasan_lab_report.pdf`, edit/remove/add extracted values, then confirm and show the updated timeline/trends.
+5. Admin: open **Tasks**, start/complete Patient #104's task, discharge the patient, complete cleaning, and show available capacity increase. Open **Safety**, simulate Room 204 fall risk, send a nurse, acknowledge, and resolve.
+
+## Safety and privacy
+
+- Patient ownership and doctor consent are enforced in backend clinical endpoints.
+- Hospital admins can access operational data but not full patient clinical histories.
+- AI never controls authentication, consent, insurance math, appointments, tasks, discharge, beds, or capacity.
+- Extracted document data remains untrusted until a patient reviews and confirms it.
+- No real patient data or client-side API secrets are included.
