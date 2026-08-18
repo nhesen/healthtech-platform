@@ -1,7 +1,7 @@
 """Generate the synthetic, text-based lab PDF used in the hackathon demo."""
 from pathlib import Path
 
-lines=["Hasan M. - Synthetic Lab Report","Report date: 2026-08-19","HbA1c 6.3 % 4.0-5.6","Glucose 108 mg/dL 70-99","Vitamin D 28 ng/mL 30-100","Hemoglobin 14.1 g/dL 12-16"]
+lines=["Hasan M. - Synthetic Lab Report","Report date: 2026-08-18","HbA1c 6.3 % 4.0-5.6","Glucose 108 mg/dL 70-99","Vitamin D 28 ng/mL 30-100","Hemoglobin 14.1 g/dL 12-16"]
 commands=["BT","/F1 16 Tf","72 750 Td"]
 for index,line in enumerate(lines):
     escaped=line.replace("\\","\\\\").replace("(","\\(").replace(")","\\)")

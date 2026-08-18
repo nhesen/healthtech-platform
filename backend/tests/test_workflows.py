@@ -24,7 +24,7 @@ def test_rbac_and_consent_isolation():
     assert c.get("/doctors/patients/patient_hasan/brief",headers=DOCTOR).status_code==403
 
 def test_consent_category_filter_and_expiry():
-    c=client(); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]; c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
+    c=client(); slot=next(x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE")["id"]; c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
     consent=c.post("/consents",headers=PATIENT,json={"doctor_id":"doctor_leyla","categories":["MEDICATIONS"],"hours":24}).json()
     assert c.get("/patients/patient_hasan/lab-results",headers=DOCTOR).status_code==403
     brief=c.get("/doctors/patients/patient_hasan/brief",headers=DOCTOR).json()
@@ -37,7 +37,7 @@ def test_consent_category_filter_and_expiry():
     assert c.get("/doctors/patients/patient_hasan/brief",headers=DOCTOR).status_code==403
 
 def test_booking_cancel_and_reschedule_release_slots():
-    c=client(); slots=c.get("/doctors/doctor_leyla/availability").json()
+    c=client(); slots=[x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE"]
     first,second=slots[0]["id"],slots[1]["id"]
     appointment=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":first}).json()
     assert c.patch(f"/appointments/{appointment['id']}/reschedule",headers=PATIENT,json={"slot_id":second}).status_code==200
@@ -67,7 +67,7 @@ def test_document_upload_review_confirm_and_duplicate_protection():
     assert payload["document_id"] in record["content_json"]
 
 def test_consultation_requires_consent_and_doctor_approval():
-    c=client(); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]
+    c=client(); slot=next(x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE")["id"]
     appointment=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot}).json()
     body={"appointment_id":appointment["id"],"doctor_notes":"Reviewed HbA1c trend.","final_note":"Patient was reviewed; follow-up discussed.","complete":True}
     assert c.post("/consultations",headers=DOCTOR,json=body).status_code==403
@@ -79,7 +79,7 @@ def test_consultation_requires_consent_and_doctor_approval():
     assert any(x["title"]=="Endocrinology consultation" for x in c.get("/patients/patient_hasan/timeline",headers=PATIENT).json())
 
 def test_post_discharge_alert_notification_and_safety_deduplication():
-    c=client(); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]; c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
+    c=client(); slot=next(x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE")["id"]; c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
     low={"pain_score":2,"temperature":36.7,"medication_taken":True,"symptoms":"","notes":"ok"}; high={"pain_score":7,"temperature":38.2,"medication_taken":False,"symptoms":"fever","notes":"worse"}
     c.post("/post-discharge/patient_hasan",headers=PATIENT,json=low)
     assert c.post("/post-discharge/patient_hasan",headers=PATIENT,json=high).json()["requires_review"] is True
@@ -93,7 +93,7 @@ def test_post_discharge_alert_notification_and_safety_deduplication():
     assert c.patch(f"/cv-events/{first['id']}/resolve",headers=ADMIN).json()["status"]=="RESOLVED"
 
 def test_notification_user_isolation_and_mark_all():
-    c=client(); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]
+    c=client(); slot=next(x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE")["id"]
     c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
     assert c.get("/notifications/unread-count",headers=DOCTOR).json()["count"]>0
     assert c.patch("/notifications/read-all",headers=DOCTOR).json()["status"]=="ok"

@@ -13,7 +13,7 @@ def fresh():
     seed();return TestClient(app)
 
 def book_and_consent(c,categories=None):
-    slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]
+    slot=next(x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE")["id"]
     appointment=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot}).json()
     consent=c.post("/consents",headers=PATIENT,json={"doctor_id":"doctor_leyla","categories":categories or ["LAB_RESULTS","MEDICATIONS","DIAGNOSES","DOCTOR_NOTES"],"hours":24}).json()
     return appointment,consent
@@ -67,7 +67,7 @@ def test_hospital_admin_scope_is_enforced():
     assert c.get("/appointments",headers=other).json()==[]
 
 def test_appointment_ownership_atomic_reschedule_and_transitions():
-    c=fresh();slots=c.get("/doctors/doctor_leyla/availability").json();first,second=slots[0]["id"],slots[1]["id"]
+    c=fresh();slots=[x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE"];first,second=slots[0]["id"],slots[1]["id"]
     a=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":first}).json()
     c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":second})
     assert c.patch(f"/appointments/{a['id']}/cancel",headers=OTHER_PATIENT).status_code==403
@@ -81,10 +81,10 @@ def test_appointment_ownership_atomic_reschedule_and_transitions():
     assert c.patch(f"/appointments/{a['id']}/status",headers=DOCTOR,json={"status":"WAITING"}).status_code==409
 
 def test_queue_lab_comparison_and_consultation_draft_approval():
-    c=fresh();slots=c.get("/doctors/doctor_leyla/availability").json()
+    c=fresh();slots=[x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE"]
     first=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slots[0]["id"]}).json()
     second=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slots[1]["id"]}).json()
-    queue=c.get(f"/appointments/{second['id']}/queue",headers=PATIENT).json();assert queue["queue_position"]==2 and queue["estimated_wait_minutes"]==15
+    queue=c.get(f"/appointments/{second['id']}/queue",headers=PATIENT).json();assert queue["queue_position"]==5 and queue["estimated_wait_minutes"]==60
     comparison=c.get("/patients/patient_hasan/lab-comparison?from_date=2024-12-31&to_date=2026-12-31",headers=PATIENT).json()
     hba=next(x for x in comparison["metrics"] if x["metric"]=="HbA1c");assert hba["change"]==0.9 and hba["direction"]=="up"
     consent=c.post("/consents",headers=PATIENT,json={"doctor_id":"doctor_leyla","categories":["DOCTOR_NOTES"],"hours":24});assert consent.status_code==201
@@ -113,7 +113,7 @@ def test_document_doctor_access_requires_relationship_and_category():
     document=c.post("/documents/upload",headers=PATIENT,files=files).json()["document_id"]
     c.post("/consents",headers=PATIENT,json={"doctor_id":"doctor_leyla","categories":["LAB_RESULTS"],"hours":24})
     assert c.get(f"/documents/{document}",headers=DOCTOR).status_code==403
-    slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]
+    slot=next(x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE")["id"]
     c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
     detail=c.get(f"/documents/{document}",headers=DOCTOR)
     assert detail.status_code==200 and "storage_path" not in detail.json() and "file_hash" not in detail.json()

@@ -1,5 +1,6 @@
 export type DemoRole = "patient@demo.az" | "doctor@demo.az" | "admin@demo.az";
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE !== "false";
 export class ApiError extends Error { constructor(public status:number,message:string){super(message)} }
 async function checked<T>(res:Response):Promise<T>{
   if(res.ok)return res.json();

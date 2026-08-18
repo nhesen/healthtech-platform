@@ -22,7 +22,7 @@ def test_trend_conflict_and_insurance():
 
 
 def test_booking_consent_and_doctor_brief():
-    reset(); c=TestClient(app); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]
+    reset(); c=TestClient(app); slot=next(x for x in c.get("/doctors/doctor_leyla/availability").json() if x["status"]=="AVAILABLE")["id"]
     booked=c.post("/appointments",headers={"X-Demo-User":"patient@demo.az"},json={"doctor_id":"doctor_leyla","slot_id":slot}).json(); assert booked["status"]=="SCHEDULED"
     assert c.post("/appointments",headers={"X-Demo-User":"patient@demo.az"},json={"doctor_id":"doctor_leyla","slot_id":slot}).status_code==409
     c.post("/consents",headers={"X-Demo-User":"patient@demo.az"},json={"doctor_id":"doctor_leyla","categories":["LAB_RESULTS","MEDICATIONS","DOCTOR_NOTES"]})

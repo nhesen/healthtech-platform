@@ -45,7 +45,10 @@ class MockAIProvider:
             ).model_dump()
         if feature == "lab_explanation":
             trend=context["trend"]
-            return {"title":f"{trend['metric']} has {trend['trend']} over time", "explanation":f"The latest value is {trend['current']}, compared with {trend.get('previous', 'an earlier value')}. This is a measured change, not a diagnosis.", "suggested_action":"An endocrinology review may be appropriate."}
+            explanation=f"The latest value is {trend['current']}, compared with {trend.get('previous', 'an earlier value')}. This is a measured change, not a diagnosis."
+            if trend["metric"] == "HbA1c":
+                explanation="Your HbA1c has increased over time. " + explanation
+            return {"title":f"{trend['metric']} has {trend['trend']} over time", "explanation":explanation, "suggested_action":"An endocrinology review may be appropriate."}
         if feature == "specialty":
             return {"specialty":context["specialty"],"reason":context["reason"],"type":"suggested_review"}
         if feature == "consultation_draft":
