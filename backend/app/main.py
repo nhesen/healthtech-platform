@@ -158,6 +158,7 @@ def boot(): seed()
 
 class AppointmentIn(BaseModel): doctor_id:str; slot_id:str; reason:str="Endocrinology consultation"
 class RescheduleIn(BaseModel): slot_id:str
+class AppointmentStatusIn(BaseModel): status:Literal["SCHEDULED","CHECKED_IN","WAITING","IN_PROGRESS","COMPLETED","CANCELLED"]
 class ConsentIn(BaseModel): doctor_id:str; categories:list[str]; hours:int=Field(24,ge=1,le=168)
 class ConsultationIn(BaseModel): appointment_id:str; transcript:str=""; doctor_notes:str=""; final_note:str|None=None; complete:bool=False
 class CheckinIn(BaseModel): pain_score:int=Field(ge=1,le=10); temperature:float; medication_taken:bool; symptoms:str=""; notes:str=""
@@ -230,7 +231,7 @@ def book(payload:AppointmentIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
         p=one(conn,"SELECT id,insurance_plan FROM patients WHERE user_id=?",(user.id,)); slot=one(conn,"SELECT * FROM availability WHERE id=? AND doctor_id=?",(payload.slot_id,payload.doctor_id)); d=one(conn,"SELECT specialty,price FROM doctors WHERE id=?",(payload.doctor_id,))
         if not slot or slot["status"]!="AVAILABLE": raise HTTPException(409,"Slot is no longer available")
-        cost=insurance(p["insurance_plan"],d["specialty"],d["price"]); aid=uid("appt"); conn.execute("INSERT INTO appointments VALUES(?,?,?,?,?,?,?,?)",(aid,p["id"],payload.doctor_id,payload.slot_id,"SCHEDULED",payload.reason,json.dumps(cost),now())); conn.execute("UPDATE availability SET status='BOOKED' WHERE id=?",(payload.slot_id,)); notify(conn,user_id=user.id,kind="SUCCESS",message="Appointment confirmed.",related_type="appointment",related_id=aid); audit(conn,user.id,"APPOINTMENT_BOOKED","appointment",aid,cost)
+        cost=insurance(p["insurance_plan"],d["specialty"],d["price"]); aid=uid("appt"); conn.execute("INSERT INTO appointments VALUES(?,?,?,?,?,?,?,?)",(aid,p["id"],payload.doctor_id,payload.slot_id,"SCHEDULED",payload.reason,json.dumps(cost),now())); conn.execute("UPDATE availability SET status='BOOKED' WHERE id=?",(payload.slot_id,)); notify(conn,user_id=user.id,kind="SUCCESS",message="Appointment confirmed.",related_type="appointment",related_id=aid); doctor_user=one(conn,"SELECT user_id FROM doctors WHERE id=?",(payload.doctor_id,)); notify(conn,user_id=doctor_user["user_id"],kind="TASK",message="New appointment scheduled.",related_type="appointment",related_id=aid); audit(conn,user.id,"APPOINTMENT_BOOKED","appointment",aid,cost)
         return {"id":aid,"status":"SCHEDULED","cost":cost,"consent_suggested":True}
 @app.get("/appointments")
 def list_appointments(user:DemoUser=Depends(current_user)):
@@ -245,6 +246,14 @@ def cancel(appointment_id:str,user:DemoUser=Depends(current_user)):
         a=one(conn,"SELECT * FROM appointments WHERE id=?",(appointment_id,));
         if not a: raise HTTPException(404,"Appointment not found")
         conn.execute("UPDATE appointments SET status='CANCELLED' WHERE id=?",(appointment_id,)); conn.execute("UPDATE availability SET status='AVAILABLE' WHERE id=?",(a["slot_id"],)); audit(conn,user.id,"APPOINTMENT_CANCELLED","appointment",appointment_id); return {"status":"CANCELLED"}
+@app.patch("/appointments/{appointment_id}/status")
+def appointment_status(appointment_id:str,payload:AppointmentStatusIn,user:DemoUser=Depends(require("DOCTOR","HOSPITAL_ADMIN"))):
+    with db() as conn:
+        a=one(conn,"SELECT * FROM appointments WHERE id=?",(appointment_id,));
+        if not a: raise HTTPException(404,"Appointment not found")
+        conn.execute("UPDATE appointments SET status=? WHERE id=?",(payload.status,appointment_id)); patient_user=one(conn,"SELECT user_id FROM patients WHERE id=?",(a["patient_id"],));
+        if payload.status in ("CHECKED_IN","WAITING","COMPLETED"): notify(conn,user_id=patient_user["user_id"],kind="INFO",message=f"Appointment status updated: {payload.status.replace('_',' ').title()}.",related_type="appointment",related_id=appointment_id)
+        audit(conn,user.id,"APPOINTMENT_STATUS_UPDATED","appointment",appointment_id,{"status":payload.status}); return {"id":appointment_id,"status":payload.status}
 @app.patch("/appointments/{appointment_id}/reschedule")
 def reschedule(appointment_id:str,payload:RescheduleIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
@@ -359,14 +368,27 @@ def cv_event(payload:CVEventIn,user:DemoUser=Depends(require("HOSPITAL_ADMIN","D
         if recent: return {"id":recent["id"],"status":"deduplicated","notification_created":False}
         eid=uid("cv"); conn.execute("INSERT INTO cv_events VALUES(?,?,?,?,?,?)",(eid,payload.room_id,payload.event_type,payload.severity,payload.confidence,occurred)); conn.execute("INSERT INTO safety_event_details VALUES(?,?,?,?,?,?,?,?)",(eid,payload.patient_state,payload.previous_state,"ACTIVE",None,None,None,json.dumps(payload.metadata))); notify(conn,role="HOSPITAL_ADMIN",kind="CRITICAL",message=f"High fall risk — Room {payload.room_id}: patient attempting to stand without assistance.",related_type="cv_event",related_id=eid); audit(conn,user.id,"CV_EVENT_CREATED","cv_event",eid,{"room_id":payload.room_id,"state":payload.patient_state}); return {"id":eid,"status":"ACTIVE","notification_created":True}
 @app.get("/notifications")
-def notifications(user:DemoUser=Depends(current_user)):
-    with db() as conn:return rows(conn.execute("SELECT * FROM notifications WHERE user_id=? OR role=? ORDER BY created_at DESC",(user.id,user.role)).fetchall())
+def notifications(unread_only:bool=False,kind:str|None=None,user:DemoUser=Depends(current_user)):
+    with db() as conn:
+        sql="SELECT * FROM notifications WHERE (user_id=? OR role=?)"; args=(user.id,user.role)
+        if unread_only: sql+=" AND read_at IS NULL"
+        if kind: sql+=" AND type=?"; args+=(kind,)
+        return rows(conn.execute(sql+" ORDER BY created_at DESC",args).fetchall())
+@app.get("/notifications/unread-count")
+def unread_count(user:DemoUser=Depends(current_user)):
+    with db() as conn:return {"count":conn.execute("SELECT COUNT(*) FROM notifications WHERE (user_id=? OR role=?) AND read_at IS NULL",(user.id,user.role)).fetchone()[0]}
 @app.post("/notifications/read")
 def mark_read(payload:ReadIn,user:DemoUser=Depends(current_user)):
     with db() as conn:
         if payload.ids: conn.executemany("UPDATE notifications SET read_at=? WHERE id=? AND (user_id=? OR role=?)",[(now(),item,user.id,user.role) for item in payload.ids])
         else: conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? OR role=?",(now(),user.id,user.role))
         return {"status":"ok"}
+@app.patch("/notifications/{notification_id}/read")
+def mark_one_read(notification_id:str,user:DemoUser=Depends(current_user)):
+    with db() as conn: conn.execute("UPDATE notifications SET read_at=? WHERE id=? AND (user_id=? OR role=?)",(now(),notification_id,user.id,user.role)); return {"id":notification_id,"status":"read"}
+@app.patch("/notifications/read-all")
+def mark_all_read(user:DemoUser=Depends(current_user)):
+    with db() as conn: conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? OR role=?",(now(),user.id,user.role)); return {"status":"ok"}
 @app.get("/safety/events")
 def safety_events(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:return rows(conn.execute("SELECT e.*,d.patient_state,d.previous_state,d.status,d.acknowledged_at,d.resolved_at FROM cv_events e LEFT JOIN safety_event_details d ON d.event_id=e.id ORDER BY e.occurred_at DESC",).fetchall())
