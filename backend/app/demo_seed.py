@@ -58,16 +58,16 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
     patient_marks = _placeholders(DEMO_PATIENT_IDS)
     doctor_marks = _placeholders(DEMO_DOCTOR_IDS)
     email_marks = _placeholders(DEMO_EMAILS)
-    event_ids = [row[0] for row in conn.execute(
+    event_ids = [row["id"] for row in conn.execute(
         "SELECT id FROM cv_events WHERE hospital_id=? AND room_id='204'", (HOSPITAL_ID,)
     ).fetchall()]
     safety_task_ids: list[str] = []
     if event_ids:
         event_marks = _placeholders(event_ids)
-        safety_task_ids = [row[0] for row in conn.execute(
+        safety_task_ids = [row["id"] for row in conn.execute(
             f"SELECT id FROM safety_tasks WHERE event_id IN ({event_marks})", event_ids
         ).fetchall()]
-    upload_paths = [row[0] for row in conn.execute(
+    upload_paths = [row["storage_path"] for row in conn.execute(
         f"SELECT storage_path FROM medical_documents WHERE patient_id IN ({patient_marks})",
         DEMO_PATIENT_IDS,
     ).fetchall()]
@@ -244,8 +244,8 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
     )
     conn.executemany("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?,?)", tasks)
 
-    conn.execute("INSERT INTO checkins VALUES(?,?,?,?,?,?,?,?,?)", ("checkin_followup_day1", "patient_followup", "admission_followup", (stamp.date() - timedelta(days=2)).isoformat(), 4, 37.1, 1, "", "Recovering"))
-    conn.execute("INSERT INTO checkins VALUES(?,?,?,?,?,?,?,?,?)", ("checkin_followup_day2", "patient_followup", "admission_followup", (stamp.date() - timedelta(days=1)).isoformat(), 5, 37.5, 1, "fatigue", "Monitor symptoms"))
+    conn.execute("INSERT INTO checkins (id,patient_id,discharge_id,checkin_date,pain_score,temperature,medication_taken,symptoms,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", ("checkin_followup_day1", "patient_followup", "admission_followup", (stamp.date() - timedelta(days=2)).isoformat(), 4, 37.1, 1, "", "Recovering", (stamp - timedelta(days=2)).isoformat()))
+    conn.execute("INSERT INTO checkins (id,patient_id,discharge_id,checkin_date,pain_score,temperature,medication_taken,symptoms,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", ("checkin_followup_day2", "patient_followup", "admission_followup", (stamp.date() - timedelta(days=1)).isoformat(), 5, 37.5, 1, "fatigue", "Monitor symptoms", (stamp - timedelta(days=1)).isoformat()))
 
     conn.execute("INSERT INTO rooms VALUES(?,?,?,?,?)", ("room_204", HOSPITAL_ID, "dept_internal", "STABLE", json.dumps({"fall_risk": "HIGH", "identity_recognition": False})))
     notifications = (
@@ -261,18 +261,18 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
 def demo_readiness(conn: sqlite3.Connection, demo_pdf: Path) -> dict[str, Any]:
     checks = {
         "database": conn.execute("SELECT 1").fetchone() is not None,
-        "master_patient": conn.execute("SELECT COUNT(*) FROM patients WHERE id='patient_hasan'").fetchone()[0] == 1,
-        "master_doctor": conn.execute("SELECT COUNT(*) FROM doctors WHERE id='doctor_leyla'").fetchone()[0] == 1,
-        "doctor_count": conn.execute("SELECT COUNT(*) FROM doctors WHERE hospital_id=?", (HOSPITAL_ID,)).fetchone()[0] >= 8,
-        "available_slot": conn.execute("SELECT COUNT(*) FROM availability WHERE doctor_id='doctor_leyla' AND status='AVAILABLE'").fetchone()[0] >= 1,
-        "no_master_appointment": conn.execute("SELECT COUNT(*) FROM appointments WHERE patient_id='patient_hasan' AND status!='CANCELLED'").fetchone()[0] == 0,
-        "no_active_consent": conn.execute("SELECT COUNT(*) FROM consents WHERE patient_id='patient_hasan' AND status='ACTIVE'").fetchone()[0] == 0,
-        "hospital_200_beds": conn.execute("SELECT COUNT(*) FROM beds WHERE hospital_id=?", (HOSPITAL_ID,)).fetchone()[0] == 200,
-        "hospital_195_occupied": conn.execute("SELECT COUNT(*) FROM beds WHERE hospital_id=? AND status='OCCUPIED'", (HOSPITAL_ID,)).fetchone()[0] == 195,
-        "blocker_104_open": conn.execute("SELECT COUNT(*) FROM discharge_blockers WHERE id='blocker_104' AND status='OPEN'").fetchone()[0] == 1,
-        "task_104_pending": conn.execute("SELECT COUNT(*) FROM tasks WHERE id='task_104' AND status='PENDING'").fetchone()[0] == 1,
-        "room_204_stable": conn.execute("SELECT COUNT(*) FROM rooms WHERE id='room_204' AND safety_status='STABLE'").fetchone()[0] == 1,
-        "no_active_cv_events": conn.execute("SELECT COUNT(*) FROM cv_events e JOIN safety_event_details d ON d.event_id=e.id WHERE e.room_id='204' AND d.status!='RESOLVED'").fetchone()[0] == 0,
+        "master_patient": conn.execute("SELECT COUNT(*) AS count FROM patients WHERE id='patient_hasan'").fetchone()["count"] == 1,
+        "master_doctor": conn.execute("SELECT COUNT(*) AS count FROM doctors WHERE id='doctor_leyla'").fetchone()["count"] == 1,
+        "doctor_count": conn.execute("SELECT COUNT(*) AS count FROM doctors WHERE hospital_id=?", (HOSPITAL_ID,)).fetchone()["count"] >= 8,
+        "available_slot": conn.execute("SELECT COUNT(*) AS count FROM availability WHERE doctor_id='doctor_leyla' AND status='AVAILABLE'").fetchone()["count"] >= 1,
+        "no_master_appointment": conn.execute("SELECT COUNT(*) AS count FROM appointments WHERE patient_id='patient_hasan' AND status!='CANCELLED'").fetchone()["count"] == 0,
+        "no_active_consent": conn.execute("SELECT COUNT(*) AS count FROM consents WHERE patient_id='patient_hasan' AND status='ACTIVE'").fetchone()["count"] == 0,
+        "hospital_200_beds": conn.execute("SELECT COUNT(*) AS count FROM beds WHERE hospital_id=?", (HOSPITAL_ID,)).fetchone()["count"] == 200,
+        "hospital_195_occupied": conn.execute("SELECT COUNT(*) AS count FROM beds WHERE hospital_id=? AND status='OCCUPIED'", (HOSPITAL_ID,)).fetchone()["count"] == 195,
+        "blocker_104_open": conn.execute("SELECT COUNT(*) AS count FROM discharge_blockers WHERE id='blocker_104' AND status='OPEN'").fetchone()["count"] == 1,
+        "task_104_pending": conn.execute("SELECT COUNT(*) AS count FROM tasks WHERE id='task_104' AND status='PENDING'").fetchone()["count"] == 1,
+        "room_204_stable": conn.execute("SELECT COUNT(*) AS count FROM rooms WHERE id='room_204' AND safety_status='STABLE'").fetchone()["count"] == 1,
+        "no_active_cv_events": conn.execute("SELECT COUNT(*) AS count FROM cv_events e JOIN safety_event_details d ON d.event_id=e.id WHERE e.room_id='204' AND d.status!='RESOLVED'").fetchone()["count"] == 0,
         "demo_pdf": demo_pdf.exists(),
         "ai_fallback": True,
         "cv_simulator_contract": True,

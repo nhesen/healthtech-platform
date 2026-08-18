@@ -27,13 +27,17 @@ Next.js 15 / React / Tailwind (Doctor + Hospital Admin)
 FastAPI modular MVP (RBAC + domain APIs + deterministic engines)
           |                         |
           v                         v
-Local SQLite database        Central AI adapter
-for hackathon demo           live provider -> safe fallback
+SQLite locally or            Central AI adapter
+Supabase PostgreSQL          live provider -> safe fallback
 
 Separate Python CV module -> POST /cv-events
 ```
 
-SQLite and header-based demo authentication are intentional current local-MVP choices. The Expo app reuses this authentication contract and stores its demo session with Expo SecureStore. Protected APIs require `X-Demo-User`; there is no implicit patient fallback. Demo authentication and reset fail closed when `DEMO_MODE=false`. Production PostgreSQL/Supabase Auth and storage remain a future infrastructure migration; the mobile app does not introduce a competing authentication system.
+SQLite and header-based demo authentication are intentional hackathon choices. A Supabase PostgreSQL connection is supported through `DATABASE_URL`; local development still defaults to SQLite. The Expo app reuses the demo authentication contract and stores its demo session with Expo SecureStore. Protected APIs require `X-Demo-User`; there is no implicit patient fallback. Demo authentication and reset fail closed when `DEMO_MODE=false`. Supabase Auth and Supabase Storage are not implemented, so a future real-data production launch still requires that security migration.
+
+## Deployment
+
+Use [DEPLOYMENT.md](DEPLOYMENT.md) for the Render backend, Supabase PostgreSQL, Vercel Doctor/Admin panel, Expo Go phone setup, local CV sender, environment matrix, exact migration/seed/reset commands, and hackathon pre-flight procedure. The Patient app is Expo and is never deployed to Vercel.
 
 ## Run locally
 

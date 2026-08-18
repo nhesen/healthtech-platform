@@ -2,6 +2,7 @@ import type { DocumentUpload, ExtractedLab } from "@/types/api";
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 export const DEMO_MODE = process.env.EXPO_PUBLIC_DEMO_MODE !== "false";
+const API_TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? "20000");
 export const PATIENT_ID = "patient_hasan";
 const DEMO_EMAIL = "patient@demo.az";
 
@@ -10,7 +11,7 @@ export class ApiError extends Error {
 }
 
 function ensureConfigured() {
-  if (!API_URL) throw new ApiError(0, "Set EXPO_PUBLIC_API_URL to the backend LAN address.");
+  if (!API_URL) throw new ApiError(0, "Set EXPO_PUBLIC_API_URL to the deployed HTTPS API or a local LAN address.");
 }
 
 async function responseError(response: Response): Promise<never> {
@@ -24,9 +25,20 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("X-Demo-User", DEMO_EMAIL);
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
-  if (!response.ok) return responseError(response);
-  return response.json() as Promise<T>;
+  const controller = new AbortController();
+  const timeoutMs = path.startsWith("/documents") ? Math.max(API_TIMEOUT_MS, 60000) : API_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API_URL}${path}`, { ...init, headers, signal: controller.signal });
+    if (!response.ok) return responseError(response);
+    return response.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (controller.signal.aborted) throw new ApiError(0, "The HealthTech service took too long to respond. Please try again.");
+    throw new ApiError(0, "Unable to connect to the HealthTech service.");
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function post<T>(path: string, body?: unknown) {

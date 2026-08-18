@@ -21,7 +21,7 @@ def main():
     if not (args.simulate or args.video or args.camera is not None):parser.error("Use --simulate, --video, or --camera")
     fallback=((state,.91) for state in ["LYING"]*5+["SITTING"]*5+["STANDING"]*5)
     if args.simulate:process(fallback,settings);return
-    try:process(PoseDetector().states(args.video if args.video else args.camera,settings.frame_skip),settings)
+    try:process(PoseDetector(settings.model).states(args.video if args.video else args.camera,settings.frame_skip),settings)
     except RuntimeError as exc:
         logging.warning("%s; running deterministic safety fallback",exc)
         process(((state,.91) for state in ["LYING"]*5+["SITTING"]*5+["STANDING"]*5),settings)

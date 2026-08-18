@@ -16,16 +16,15 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from .ai import ai_service
+from .database import DATABASE_KIND, DB_PATH, connect
 from .demo_seed import DEMO_VERSION, demo_readiness, reset_demo_data
 from .documents import ALLOWED, classify, extract_text, file_hash, parse_lab
 
 ROOT = Path(__file__).resolve().parents[1]
-UPLOAD_DIR = ROOT / "uploads"; UPLOAD_DIR.mkdir(exist_ok=True)
-db_url = os.getenv("DATABASE_URL") or f"sqlite:///{ROOT / 'healthtech.db'}"
-DB_PATH = Path(db_url.replace("sqlite:///", ""))
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR") or ROOT / "uploads"); UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 AVERAGE_CONSULTATION_MINUTES = 15
 RATE_BUCKETS:dict[str,deque[float]]=defaultdict(deque)
 
@@ -53,12 +52,13 @@ def enforce_rate(key:str,limit:int,window_seconds:int)->None:
 
 @contextmanager
 def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn = connect()
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS admissions (id TEXT PRIMARY KEY, patient_id TEXT NOT 
 CREATE TABLE IF NOT EXISTS discharge_blockers (id TEXT PRIMARY KEY, admission_id TEXT NOT NULL, blocker_type TEXT NOT NULL CHECK(blocker_type IN ('LAB_REVIEW_PENDING','PHARMACY_PENDING','TRANSPORT_PENDING','DOCTOR_APPROVAL_PENDING','DOCUMENTATION_PENDING')), responsible_role TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('OPEN','RESOLVED')), estimated_minutes INTEGER NOT NULL CHECK(estimated_minutes>=0), created_at TEXT NOT NULL, resolved_at TEXT, FOREIGN KEY(admission_id) REFERENCES admissions(id));
 CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, admission_id TEXT NOT NULL, blocker_id TEXT NOT NULL, assigned_role TEXT NOT NULL, priority TEXT NOT NULL CHECK(priority IN ('LOW','MEDIUM','HIGH','CRITICAL')), priority_score REAL NOT NULL CHECK(priority_score>=0 AND priority_score<=100), status TEXT NOT NULL CHECK(status IN ('PENDING','IN_PROGRESS','COMPLETED')), impact TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT, FOREIGN KEY(admission_id) REFERENCES admissions(id), FOREIGN KEY(blocker_id) REFERENCES discharge_blockers(id));
 CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, user_id TEXT, role TEXT, hospital_id TEXT, type TEXT NOT NULL, message TEXT NOT NULL, related_type TEXT, related_id TEXT, read_at TEXT, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS checkins (id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, discharge_id TEXT, checkin_date TEXT NOT NULL, pain_score INTEGER NOT NULL, temperature REAL NOT NULL, medication_taken INTEGER NOT NULL, symptoms TEXT, notes TEXT);
+CREATE TABLE IF NOT EXISTS checkins (id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, discharge_id TEXT, checkin_date TEXT NOT NULL, pain_score INTEGER NOT NULL, temperature REAL NOT NULL, medication_taken INTEGER NOT NULL, symptoms TEXT, notes TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS cv_events (id TEXT PRIMARY KEY, hospital_id TEXT NOT NULL, room_id TEXT NOT NULL, event_type TEXT NOT NULL, severity TEXT NOT NULL, confidence REAL NOT NULL CHECK(confidence>=0 AND confidence<=1), occurred_at TEXT NOT NULL, FOREIGN KEY(hospital_id) REFERENCES hospitals(id));
 CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, hospital_id TEXT NOT NULL, department_id TEXT NOT NULL, safety_status TEXT NOT NULL CHECK(safety_status IN ('STABLE','HIGH_FALL_RISK')), patient_context_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(hospital_id) REFERENCES hospitals(id), FOREIGN KEY(department_id) REFERENCES departments(id));
 CREATE TABLE IF NOT EXISTS safety_event_details (event_id TEXT PRIMARY KEY, patient_state TEXT, previous_state TEXT, status TEXT NOT NULL, acknowledged_at TEXT, acknowledged_by TEXT, resolved_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
@@ -118,7 +118,13 @@ def notify(conn, *, user_id=None, role=None, hospital_id=None, kind="INFO", mess
     conn.execute("INSERT INTO notifications (id,user_id,role,hospital_id,type,message,related_type,related_id,read_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (uid("note"), user_id, role, hospital_id, kind, message, related_type, related_id, None, now()))
 
 def migrate(conn:sqlite3.Connection)->None:
-    """Small idempotent SQLite migrations for existing hackathon databases."""
+    """Apply idempotent compatibility migrations after the baseline schema."""
+    if DATABASE_KIND == "postgresql":
+        conn.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS hospital_id TEXT")
+        conn.execute("ALTER TABLE cv_events ADD COLUMN IF NOT EXISTS hospital_id TEXT NOT NULL DEFAULT 'hospital_caspian'")
+        conn.execute("ALTER TABLE checkins ADD COLUMN IF NOT EXISTS created_at TEXT")
+        conn.execute("UPDATE users SET profile_json=? WHERE id='user_admin' AND profile_json='{}'",(json.dumps({"hospital_id":"hospital_caspian"}),))
+        return
     appointment_sql=(conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='appointments'").fetchone() or [""])[0] or ""
     if "slot_id TEXT NOT NULL UNIQUE" in appointment_sql:
         conn.execute("DROP INDEX IF EXISTS idx_appointments_active_slot")
@@ -132,6 +138,8 @@ def migrate(conn:sqlite3.Connection)->None:
     if "hospital_id" not in notification_columns: conn.execute("ALTER TABLE notifications ADD COLUMN hospital_id TEXT")
     cv_columns={x[1] for x in conn.execute("PRAGMA table_info(cv_events)").fetchall()}
     if "hospital_id" not in cv_columns: conn.execute("ALTER TABLE cv_events ADD COLUMN hospital_id TEXT NOT NULL DEFAULT 'hospital_caspian'")
+    checkin_columns={x[1] for x in conn.execute("PRAGMA table_info(checkins)").fetchall()}
+    if "created_at" not in checkin_columns: conn.execute("ALTER TABLE checkins ADD COLUMN created_at TEXT")
     conn.execute("UPDATE users SET profile_json=? WHERE id='user_admin' AND profile_json='{}'",(json.dumps({"hospital_id":"hospital_caspian"}),))
 
 
@@ -148,7 +156,7 @@ def seed() -> None:
         conn.executescript(SCHEMA)
         migrate(conn)
         version=conn.execute("SELECT version FROM demo_seed_versions WHERE key='master'").fetchone()
-        if demo_enabled() and (not version or version[0]<DEMO_VERSION): paths=reset_demo_data(conn)
+        if demo_enabled() and (not version or version["version"]<DEMO_VERSION): paths=reset_demo_data(conn)
     _remove_demo_uploads(paths)
 
 
@@ -237,7 +245,7 @@ def specialty_for(trend_data: list[dict]) -> dict:
     abnormal=[t for t in trend_data if t["metric"] in {"HbA1c","Glucose"} and t["trend"]=="increasing"]
     return {"suggested_specialty":"Endocrinology","reason":"Recent HbA1c or glucose measurements are increasing. This is a navigation suggestion, not a diagnosis."} if abnormal else {"suggested_specialty":"Internal Medicine","reason":"A general clinical review may be useful."}
 def capacity(conn,hospital_id: str) -> dict:
-    states=rows(conn.execute("SELECT status,COUNT(*) count FROM beds WHERE hospital_id=? GROUP BY status",(hospital_id,)).fetchall()); counts={r["status"]:r["count"] for r in states}; expected=conn.execute("SELECT COUNT(*) FROM admissions WHERE hospital_id=? AND status IN ('ACTIVE','READY_FOR_DISCHARGE') AND clinical_ready=1",(hospital_id,)).fetchone()[0]; blocked=conn.execute("SELECT COUNT(*) FROM discharge_blockers b JOIN admissions a ON a.id=b.admission_id WHERE a.hospital_id=? AND b.status='OPEN'",(hospital_id,)).fetchone()[0]; h=one(conn,"SELECT emergency_waiting,expected_incoming FROM hospitals WHERE id=?",(hospital_id,))
+    states=rows(conn.execute("SELECT status,COUNT(*) count FROM beds WHERE hospital_id=? GROUP BY status",(hospital_id,)).fetchall()); counts={r["status"]:r["count"] for r in states}; expected=conn.execute("SELECT COUNT(*) AS count FROM admissions WHERE hospital_id=? AND status IN ('ACTIVE','READY_FOR_DISCHARGE') AND clinical_ready=1",(hospital_id,)).fetchone()["count"]; blocked=conn.execute("SELECT COUNT(*) AS count FROM discharge_blockers b JOIN admissions a ON a.id=b.admission_id WHERE a.hospital_id=? AND b.status='OPEN'",(hospital_id,)).fetchone()["count"]; h=one(conn,"SELECT emergency_waiting,expected_incoming FROM hospitals WHERE id=?",(hospital_id,))
     return {"total_beds":sum(counts.values()),"occupied":counts.get("OCCUPIED",0),"available":counts.get("AVAILABLE",0),"cleaning":counts.get("CLEANING",0),"expected_discharges":expected,"delayed_discharges":blocked,"emergency_waiting":h["emergency_waiting"],"expected_incoming":h["expected_incoming"]}
 def priority_score(blocker: dict, cap: dict) -> float:
     age=(datetime.now(timezone.utc)-datetime.fromisoformat(blocker["created_at"])).total_seconds()/60
@@ -250,7 +258,14 @@ async def lifespan(_:FastAPI):
     yield
 
 app=FastAPI(title="HealthTech Backbone",version="0.1.0",lifespan=lifespan)
-app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:3000,http://localhost:8081").split(",") if x.strip()],allow_methods=["GET","POST","PATCH","OPTIONS"],allow_headers=["Authorization","Content-Type","X-Demo-User","X-CV-Service-Key"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:3000,http://localhost:8081").split(",") if x.strip()],
+    allow_origin_regex=os.getenv("CORS_ORIGIN_REGEX") or None,
+    allow_credentials=False,
+    allow_methods=["GET","POST","PATCH","OPTIONS"],
+    allow_headers=["Authorization","Content-Type","X-Demo-User","X-CV-Service-Key"],
+)
 @app.middleware("http")
 async def security_headers(request,call_next):
     response=await call_next(request)
@@ -275,7 +290,12 @@ class DocumentReviewIn(BaseModel): results:list[LabResultIn]=Field(max_length=10
 class TaskUpdateIn(BaseModel): status:Literal["IN_PROGRESS"]; assigned_role:Literal["DOCTOR","HOSPITAL_ADMIN","NURSE","PHARMACY"]|None=None
 
 @app.get("/health")
-def health(): return {"status":"ok","demo_mode":demo_enabled()}
+def health():
+    try:
+        with db() as conn: conn.execute("SELECT 1").fetchone()
+        return {"status":"ok","database":"connected","demo_mode":demo_enabled()}
+    except Exception:
+        return JSONResponse(status_code=503,content={"status":"degraded","database":"unavailable","demo_mode":demo_enabled()})
 @app.get("/health/demo")
 def health_demo(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     if not demo_enabled(): raise HTTPException(404,"Not found")
@@ -490,7 +510,7 @@ def queue(appointment_id:str,user:DemoUser=Depends(current_user)):
         if user.role=="PATIENT" and not one(conn,"SELECT id FROM patients WHERE id=? AND user_id=?",(a["patient_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
         if user.role=="DOCTOR" and not one(conn,"SELECT id FROM doctors WHERE id=? AND user_id=?",(a["doctor_id"],user.id)): raise HTTPException(403,"Appointment unavailable")
         if user.role=="HOSPITAL_ADMIN": raise HTTPException(403,"Queue access is limited to the patient and treating doctor")
-        before=conn.execute("SELECT COUNT(*) FROM appointments a JOIN availability s ON s.id=a.slot_id WHERE a.doctor_id=? AND date(s.starts_at)=date(?) AND s.starts_at<? AND a.status NOT IN ('CANCELLED','COMPLETED')",(a["doctor_id"],a["starts_at"],a["starts_at"])).fetchone()[0]
+        before=conn.execute("SELECT COUNT(*) AS count FROM appointments a JOIN availability s ON s.id=a.slot_id WHERE a.doctor_id=? AND date(s.starts_at)=date(?) AND s.starts_at<? AND a.status NOT IN ('CANCELLED','COMPLETED')",(a["doctor_id"],a["starts_at"],a["starts_at"])).fetchone()["count"]
         return {"queue_position":before+1,"patients_before":before,"estimated_wait_minutes":before*AVERAGE_CONSULTATION_MINUTES}
 @app.post("/demo/queue/advance")
 def advance_demo_queue(user:DemoUser=Depends(require("DOCTOR"))):
@@ -502,7 +522,7 @@ def advance_demo_queue(user:DemoUser=Depends(require("DOCTOR"))):
         ahead=one(conn,"SELECT a.id FROM appointments a JOIN availability s ON s.id=a.slot_id WHERE a.doctor_id=? AND date(s.starts_at)=date(?) AND s.starts_at<? AND a.status NOT IN ('CANCELLED','COMPLETED') ORDER BY s.starts_at LIMIT 1",(target["doctor_id"],target["starts_at"],target["starts_at"]))
         if not ahead: raise HTTPException(409,"The demo queue is already at the front")
         conn.execute("UPDATE appointments SET status='COMPLETED' WHERE id=?",(ahead["id"],)); audit(conn,user.id,"DEMO_QUEUE_ADVANCED","appointment",ahead["id"])
-        before=conn.execute("SELECT COUNT(*) FROM appointments a JOIN availability s ON s.id=a.slot_id WHERE a.doctor_id=? AND date(s.starts_at)=date(?) AND s.starts_at<? AND a.status NOT IN ('CANCELLED','COMPLETED')",(target["doctor_id"],target["starts_at"],target["starts_at"])).fetchone()[0]
+        before=conn.execute("SELECT COUNT(*) AS count FROM appointments a JOIN availability s ON s.id=a.slot_id WHERE a.doctor_id=? AND date(s.starts_at)=date(?) AND s.starts_at<? AND a.status NOT IN ('CANCELLED','COMPLETED')",(target["doctor_id"],target["starts_at"],target["starts_at"])).fetchone()["count"]
         return {"advanced_appointment_id":ahead["id"],"queue_position":before+1,"patients_before":before,"estimated_wait_minutes":before*AVERAGE_CONSULTATION_MINUTES}
 @app.post("/consents",status_code=201)
 def grant_consent(payload:ConsentIn,user:DemoUser=Depends(require("PATIENT"))):
@@ -566,7 +586,7 @@ def bed_list(hospital_id:str,department_id:str|None=None,status_filter:str|None=
 def patient_flow(hospital_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:
         enforce_hospital(conn,user,hospital_id)
-        result=rows(conn.execute("SELECT status,COUNT(*) count FROM admissions WHERE hospital_id=? GROUP BY status",(hospital_id,)).fetchall()); blocked=conn.execute("SELECT COUNT(*) FROM admissions a WHERE a.hospital_id=? AND EXISTS(SELECT 1 FROM discharge_blockers b WHERE b.admission_id=a.id AND b.status='OPEN')",(hospital_id,)).fetchone()[0]
+        result=rows(conn.execute("SELECT status,COUNT(*) count FROM admissions WHERE hospital_id=? GROUP BY status",(hospital_id,)).fetchall()); blocked=conn.execute("SELECT COUNT(*) AS count FROM admissions a WHERE a.hospital_id=? AND EXISTS(SELECT 1 FROM discharge_blockers b WHERE b.admission_id=a.id AND b.status='OPEN')",(hospital_id,)).fetchone()["count"]
         return {"stages":result,"blocked":blocked}
 @app.get("/discharge-blockers")
 def blockers(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
@@ -605,13 +625,13 @@ def complete_task(task_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN","DO
         enforce_hospital(conn,user,t["hospital_id"])
         if user.role==Role.DOCTOR and t["assigned_role"]!="DOCTOR": raise HTTPException(403,"Task is not assigned to doctors")
         if t["status"]!="IN_PROGRESS": raise HTTPException(409,"Task must be in progress before completion")
-        conn.execute("UPDATE tasks SET status='COMPLETED',completed_at=? WHERE id=?",(now(),task_id)); conn.execute("UPDATE discharge_blockers SET status='RESOLVED',resolved_at=? WHERE id=?",(now(),t["blocker_id"])); unresolved=conn.execute("SELECT COUNT(*) FROM discharge_blockers WHERE admission_id=? AND status='OPEN'",(t["admission_id"],)).fetchone()[0]
+        conn.execute("UPDATE tasks SET status='COMPLETED',completed_at=? WHERE id=?",(now(),task_id)); conn.execute("UPDATE discharge_blockers SET status='RESOLVED',resolved_at=? WHERE id=?",(now(),t["blocker_id"])); unresolved=conn.execute("SELECT COUNT(*) AS count FROM discharge_blockers WHERE admission_id=? AND status='OPEN'",(t["admission_id"],)).fetchone()["count"]
         if unresolved==0: conn.execute("UPDATE admissions SET status='READY_FOR_DISCHARGE' WHERE id=?",(t["admission_id"],))
         notify(conn,role="HOSPITAL_ADMIN",hospital_id=t["hospital_id"],kind="SUCCESS",message=f"Task completed: {t['title']}",related_type="task",related_id=task_id); audit(conn,user.id,"BLOCKER_RESOLVED","blocker",t["blocker_id"]); audit(conn,user.id,"HOSPITAL_TASK_COMPLETED","task",task_id); return {"task_status":"COMPLETED","admission_status":"READY_FOR_DISCHARGE" if unresolved==0 else "BLOCKED"}
 @app.post("/admissions/{admission_id}/discharge")
 def discharge(admission_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:
-        a=one(conn,"SELECT * FROM admissions WHERE id=?",(admission_id,)); blockers=conn.execute("SELECT COUNT(*) FROM discharge_blockers WHERE admission_id=? AND status='OPEN'",(admission_id,)).fetchone()[0]
+        a=one(conn,"SELECT * FROM admissions WHERE id=?",(admission_id,)); blockers=conn.execute("SELECT COUNT(*) AS count FROM discharge_blockers WHERE admission_id=? AND status='OPEN'",(admission_id,)).fetchone()["count"]
         if not a: raise HTTPException(404,"Admission not found")
         enforce_hospital(conn,user,a["hospital_id"])
         if blockers or a["status"]!="READY_FOR_DISCHARGE" or not a["clinical_ready"]: raise HTTPException(409,"Admission is not ready for discharge")
@@ -630,12 +650,12 @@ def complete_cleaning(bed_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN")
 def checkin_history(patient_id:str,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
         clinical_access(conn,patient_id,user)
-        return rows(conn.execute("SELECT id,checkin_date,pain_score,temperature,medication_taken,symptoms,notes FROM checkins WHERE patient_id=? ORDER BY checkin_date DESC,rowid DESC",(patient_id,)).fetchall())
+        return rows(conn.execute("SELECT id,checkin_date,pain_score,temperature,medication_taken,symptoms,notes FROM checkins WHERE patient_id=? ORDER BY checkin_date DESC,created_at DESC",(patient_id,)).fetchall())
 @app.post("/post-discharge/{patient_id}",status_code=201)
 def checkin(patient_id:str,payload:CheckinIn,user:DemoUser=Depends(require("PATIENT"))):
     with db() as conn:
         clinical_access(conn,patient_id,user)
-        conn.execute("INSERT INTO checkins VALUES(?,?,?,?,?,?,?,?,?)",(uid("checkin"),patient_id,None,date.today().isoformat(),payload.pain_score,payload.temperature,int(payload.medication_taken),payload.symptoms,payload.notes)); history=rows(conn.execute("SELECT * FROM checkins WHERE patient_id=? ORDER BY checkin_date DESC,rowid DESC LIMIT 3",(patient_id,)).fetchall()); worsening=len(history)>=2 and (history[0]["pain_score"]>history[-1]["pain_score"] or history[0]["temperature"]>=38)
+        conn.execute("INSERT INTO checkins (id,patient_id,discharge_id,checkin_date,pain_score,temperature,medication_taken,symptoms,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",(uid("checkin"),patient_id,None,date.today().isoformat(),payload.pain_score,payload.temperature,int(payload.medication_taken),payload.symptoms,payload.notes,now())); history=rows(conn.execute("SELECT * FROM checkins WHERE patient_id=? ORDER BY checkin_date DESC,created_at DESC LIMIT 3",(patient_id,)).fetchall()); worsening=len(history)>=2 and (history[0]["pain_score"]>history[-1]["pain_score"] or history[0]["temperature"]>=38)
         if worsening:
             treating=one(conn,"SELECT d.user_id FROM appointments a JOIN doctors d ON d.id=a.doctor_id WHERE a.patient_id=? AND a.status!='CANCELLED' ORDER BY a.created_at DESC LIMIT 1",(patient_id,))
             if treating: notify(conn,user_id=treating["user_id"],kind="WARNING",message="Patient post-discharge trend requires review.",related_type="patient",related_id=patient_id)
@@ -665,8 +685,8 @@ def notifications(unread_only:bool=False,kind:str|None=None,user:DemoUser=Depend
 @app.get("/notifications/unread-count")
 def unread_count(user:DemoUser=Depends(current_user)):
     with db() as conn:
-        if user.role==Role.HOSPITAL_ADMIN: count=conn.execute("SELECT COUNT(*) FROM notifications WHERE (user_id=? OR (role=? AND hospital_id=?)) AND read_at IS NULL",(user.id,user.role,hospital_scope(conn,user))).fetchone()[0]
-        else: count=conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND read_at IS NULL",(user.id,)).fetchone()[0]
+        if user.role==Role.HOSPITAL_ADMIN: count=conn.execute("SELECT COUNT(*) AS count FROM notifications WHERE (user_id=? OR (role=? AND hospital_id=?)) AND read_at IS NULL",(user.id,user.role,hospital_scope(conn,user))).fetchone()["count"]
+        else: count=conn.execute("SELECT COUNT(*) AS count FROM notifications WHERE user_id=? AND read_at IS NULL",(user.id,)).fetchone()["count"]
         return {"count":count}
 @app.post("/notifications/read")
 def mark_read(payload:ReadIn,user:DemoUser=Depends(current_user)):

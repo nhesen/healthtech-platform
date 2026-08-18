@@ -5,7 +5,7 @@ import {useParams} from "next/navigation";
 import {API_BASE,DEMO_MODE,api,request,DemoRole} from "../../../lib/api";
 
 const emails:Record<string,DemoRole>={patient:"patient@demo.az",doctor:"doctor@demo.az",admin:"admin@demo.az"};
-const paths:Record<string,string>={"patient/health":"/patients/patient_hasan/overview","patient/appointments":"/appointments","patient/insurance":"/insurance/estimate?patient_id=patient_hasan&doctor_id=doctor_leyla","patient/permissions":"/consents","patient/documents":"/documents?patient_id=patient_hasan","doctor/patients":"/appointments","doctor/alerts":"/notifications","doctor/consultations":"/appointments","admin/beds":"/hospitals/hospital_caspian/beds","admin/flow":"/hospitals/hospital_caspian/flow","admin/tasks":"/tasks","admin/safety":"/safety/events","admin/analytics":"/hospitals/hospital_caspian/forecast"};
+const paths:Record<string,string>={"patient/health":"/patients/patient_hasan/overview","patient/appointments":"/appointments","patient/insurance":"/insurance/estimate?patient_id=patient_hasan&doctor_id=doctor_leyla","patient/permissions":"/consents","patient/documents":"/documents?patient_id=patient_hasan","doctor/patients":"/appointments","doctor/alerts":"/notifications","doctor/consultations":"/appointments","admin/command-center":"/hospitals/hospital_caspian/capacity","admin/beds":"/hospitals/hospital_caspian/beds","admin/flow":"/hospitals/hospital_caspian/flow","admin/tasks":"/tasks","admin/safety":"/safety/events","admin/analytics":"/hospitals/hospital_caspian/forecast"};
 const button="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50";
 const secondary="rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold";
 

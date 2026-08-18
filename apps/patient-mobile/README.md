@@ -4,14 +4,15 @@ Expo SDK 57, React Native, TypeScript, and Expo Router patient application. It c
 
 ## Configure
 
-Copy `.env.example` to `.env`, then replace the example address with the development computer's LAN IPv4 address:
+Copy `.env.example` to `.env`. For the hackathon, use the public HTTPS backend; a LAN IPv4 address remains available for local development:
 
 ```env
-EXPO_PUBLIC_API_URL=http://192.168.x.x:8000
+EXPO_PUBLIC_API_URL=https://healthtech-api.onrender.com
 EXPO_PUBLIC_DEMO_MODE=true
+EXPO_PUBLIC_API_TIMEOUT_MS=20000
 ```
 
-`localhost` will not work from a physical phone. The phone and computer must be on the same network, FastAPI must listen on `0.0.0.0`, and the firewall must allow private-network access to ports 8000 and 8081.
+`localhost` will not work from a physical phone. When using a local LAN URL, the phone and computer must be on the same network, FastAPI must listen on `0.0.0.0`, and the firewall must allow private-network access to ports 8000 and 8081.
 
 ## Run
 

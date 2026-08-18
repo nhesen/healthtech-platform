@@ -24,7 +24,7 @@ class PoseDetector:
             from ultralytics import YOLO
         except ImportError as exc:
             raise RuntimeError("Install cv_service/requirements-vision.txt for YOLO video mode") from exc
-        self.model=YOLO(model_name or os.getenv("YOLO_POSE_MODEL","yolo11n-pose.pt"))
+        self.model=YOLO(model_name or os.getenv("CV_MODEL") or os.getenv("YOLO_POSE_MODEL","yolo11n-pose.pt"))
     def states(self,source:str|int,frame_skip:int=2)->Iterator[tuple[str,float]]:
         for index,result in enumerate(self.model.predict(source=source,stream=True,verbose=False)):
             if index%max(1,frame_skip):continue
