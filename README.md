@@ -30,7 +30,7 @@ for hackathon demo           live provider -> safe fallback
 Separate Python CV module -> POST /cv-events
 ```
 
-SQLite and header-based demo authentication are intentional local-MVP choices. The domain API boundaries can be moved to PostgreSQL/Supabase Auth after the hackathon without changing the frontend workflows.
+SQLite and header-based demo authentication are intentional local-MVP choices. Protected APIs require `X-Demo-User`; there is no implicit patient fallback. Demo authentication and reset fail closed when `DEMO_MODE=false`. The domain API boundaries can be moved to PostgreSQL/Supabase Auth after the hackathon without changing the frontend workflows.
 
 ## Run locally
 
@@ -55,6 +55,39 @@ npm run dev
 
 Open `http://localhost:3000`. API documentation is at `http://localhost:8000/docs`.
 
+## Run with Docker
+
+Start the backend and frontend from the repository root:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Open `http://localhost:3000`. Backend health is available at `http://localhost:8000/health`.
+
+If port 3000 is already in use, choose another host port before starting:
+
+```powershell
+$env:FRONTEND_PORT="3001"
+$env:CORS_ORIGINS="http://localhost:3001"
+docker compose up --build -d
+```
+
+Run the optional one-shot CV simulator after the stack is healthy:
+
+```powershell
+docker compose --profile cv run --rm cv-simulator
+```
+
+Stop the application without deleting its database or uploaded-document volumes:
+
+```powershell
+docker compose down
+```
+
+To intentionally remove demo volumes as well, use `docker compose down -v`.
+
 Optional environment variables:
 
 ```powershell
@@ -63,6 +96,8 @@ $env:CORS_ORIGINS="http://localhost:3000"
 $env:AI_PROVIDER="mock"  # use openai only with a server-side AI_API_KEY
 $env:DEMO_MODE="true"
 ```
+
+Copy [.env.example](.env.example) when configuring a deployment. Never place real secrets in frontend variables or commit them. A production CV sender must configure the same `CV_SERVICE_TOKEN` on the backend and CV process; demo-mode admin headers are accepted only while `DEMO_MODE=true`.
 
 ## Tests and build
 
@@ -127,7 +162,11 @@ It restores Hasan's health history, Dr. Leyla, appointments and slots, consent, 
 ## Safety and privacy
 
 - Patient ownership and doctor consent are enforced in backend clinical endpoints.
+- Doctor clinical access requires both an appointment relationship and active, category-matching consent.
 - Hospital admins can access operational data but not full patient clinical histories.
+- Hospital resources, alerts, CV events, tasks, and audit views are scoped to the admin's assigned hospital.
+- Appointment, task, discharge, bed-cleaning, and safety-event state transitions are validated by the backend.
+- Uploads are checked by extension, MIME type, size, and file signature; internal storage paths and hashes are not returned.
 - AI never controls authentication, consent, insurance math, appointments, tasks, discharge, beds, or capacity.
 - Extracted document data remains untrusted until a patient reviews and confirms it.
 - No real patient data or client-side API secrets are included.

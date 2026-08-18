@@ -1,0 +1,64 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: sqlite:////data/healthtech.db
+      DEMO_MODE: ${DEMO_MODE:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      CV_SERVICE_TOKEN: ${CV_SERVICE_TOKEN:-}
+      CV_HOSPITAL_ID: ${CV_HOSPITAL_ID:-hospital_caspian}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - backend_data:/data
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  cv-simulator:
+    profiles: ["cv"]
+    build:
+      context: ./cv_service
+    environment:
+      CV_BACKEND_URL: http://backend:8000
+      CV_SERVICE_TOKEN: ${CV_SERVICE_TOKEN:-}
+      DEMO_ROOM_ID: ${DEMO_ROOM_ID:-204}
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: ["python", "run_demo.py", "--simulate"]
+    restart: "no"
+
+volumes:
+  backend_data:
+  uploads_data:

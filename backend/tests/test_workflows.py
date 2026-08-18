@@ -24,7 +24,8 @@ def test_rbac_and_consent_isolation():
     assert c.get("/doctors/patients/patient_hasan/brief",headers=DOCTOR).status_code==403
 
 def test_consent_category_filter_and_expiry():
-    c=client(); consent=c.post("/consents",headers=PATIENT,json={"doctor_id":"doctor_leyla","categories":["MEDICATIONS"],"hours":24}).json()
+    c=client(); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]; c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
+    consent=c.post("/consents",headers=PATIENT,json={"doctor_id":"doctor_leyla","categories":["MEDICATIONS"],"hours":24}).json()
     assert c.get("/patients/patient_hasan/lab-results",headers=DOCTOR).status_code==403
     brief=c.get("/doctors/patients/patient_hasan/brief",headers=DOCTOR).json()
     assert brief["relevant_metrics"]==[] and brief["allergies"]==[] and brief["medications"]
@@ -45,6 +46,8 @@ def test_booking_cancel_and_reschedule_release_slots():
     c.patch(f"/appointments/{appointment['id']}/cancel",headers=PATIENT)
     states={x["id"]:x["status"] for x in c.get("/doctors/doctor_leyla/availability").json()}
     assert states[second]=="AVAILABLE"
+    replacement=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":second})
+    assert replacement.status_code==201 and replacement.json()["id"]!=appointment["id"]
 
 def test_document_upload_review_confirm_and_duplicate_protection():
     c=client(); content=(Path(__file__).parents[1]/"demo_documents"/"hasan_lab_report.pdf").read_bytes()
@@ -59,6 +62,9 @@ def test_document_upload_review_confirm_and_duplicate_protection():
     assert confirmed.status_code==200 and confirmed.json()["results_created"]==4
     assert c.post(f"/documents/{payload['document_id']}/confirm",headers=PATIENT,json=reviewed).status_code==409
     assert any(x["record_id"]==confirmed.json()["record_id"] for x in c.get("/patients/patient_hasan/lab-results",headers=PATIENT).json())
+    with db() as conn:
+        record=conn.execute("SELECT content_json FROM medical_records WHERE id=?",(confirmed.json()["record_id"],)).fetchone()
+    assert payload["document_id"] in record["content_json"]
 
 def test_consultation_requires_consent_and_doctor_approval():
     c=client(); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]
@@ -66,12 +72,15 @@ def test_consultation_requires_consent_and_doctor_approval():
     body={"appointment_id":appointment["id"],"doctor_notes":"Reviewed HbA1c trend.","final_note":"Patient was reviewed; follow-up discussed.","complete":True}
     assert c.post("/consultations",headers=DOCTOR,json=body).status_code==403
     grant(c)
+    assert c.post("/consultations",headers=DOCTOR,json=body).status_code==409
+    for state in ["CHECKED_IN","WAITING","IN_PROGRESS"]: c.patch(f"/appointments/{appointment['id']}/status",headers=DOCTOR,json={"status":state})
     result=c.post("/consultations",headers=DOCTOR,json=body)
     assert result.status_code==201 and result.json()["status"]=="COMPLETED"
     assert any(x["title"]=="Endocrinology consultation" for x in c.get("/patients/patient_hasan/timeline",headers=PATIENT).json())
 
 def test_post_discharge_alert_notification_and_safety_deduplication():
-    c=client(); low={"pain_score":2,"temperature":36.7,"medication_taken":True,"symptoms":"","notes":"ok"}; high={"pain_score":7,"temperature":38.2,"medication_taken":False,"symptoms":"fever","notes":"worse"}
+    c=client(); slot=c.get("/doctors/doctor_leyla/availability").json()[0]["id"]; c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slot})
+    low={"pain_score":2,"temperature":36.7,"medication_taken":True,"symptoms":"","notes":"ok"}; high={"pain_score":7,"temperature":38.2,"medication_taken":False,"symptoms":"fever","notes":"worse"}
     c.post("/post-discharge/patient_hasan",headers=PATIENT,json=low)
     assert c.post("/post-discharge/patient_hasan",headers=PATIENT,json=high).json()["requires_review"] is True
     assert any(n["type"]=="WARNING" for n in c.get("/notifications",headers=DOCTOR).json())
@@ -80,6 +89,7 @@ def test_post_discharge_alert_notification_and_safety_deduplication():
     assert second["status"]=="deduplicated"
     nurse=c.post(f"/cv-events/{first['id']}/send-nurse",headers=ADMIN).json(); again=c.post(f"/cv-events/{first['id']}/send-nurse",headers=ADMIN).json()
     assert nurse["id"]==again["id"] and again["deduplicated"] is True
+    assert c.patch(f"/cv-events/{first['id']}/acknowledge",headers=ADMIN).json()["status"]=="ACKNOWLEDGED"
     assert c.patch(f"/cv-events/{first['id']}/resolve",headers=ADMIN).json()["status"]=="RESOLVED"
 
 def test_notification_user_isolation_and_mark_all():
