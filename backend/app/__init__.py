@@ -1,1 +1,1 @@
-"""HealthTech modular-monolith backend."""
+"""DigiSolution modular-monolith backend."""

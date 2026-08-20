@@ -2,7 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import type { DemoRole, DemoUser } from "@/types/api";
 
-const KEY = "healthtech.patient.session";
+const KEY = "digisolution.patient.session";
 
 export const ROLE_LABELS: Record<DemoRole, string> = { PATIENT: "Vətəndaş", DOCTOR: "Həkim", HOSPITAL_ADMIN: "Xəstəxana" };
 export const ROLE_HOME = { PATIENT: "/(tabs)", DOCTOR: "/doctor", HOSPITAL_ADMIN: "/admin" } as const;

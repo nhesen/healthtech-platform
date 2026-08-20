@@ -26,7 +26,7 @@ def main() -> int:
         payload.update({
             "yolo_active": True,
             "engine": "ultralytics-yolo",
-            "model": os.getenv("CV_DETECT_MODEL", "yolo11n.pt"),
+            "model": os.getenv("CV_DETECT_MODEL", "yolo11s.pt"),
             "device": os.getenv("CV_DEVICE", "cpu"),
             "identity_recognition": False,
             "frames_discarded": True,

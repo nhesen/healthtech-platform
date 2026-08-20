@@ -1,17 +1,17 @@
 {
   "expo": {
-    "name": "HealthTech",
-    "slug": "healthtech-patient",
+    "name": "DigiSolution",
+    "slug": "digisolution-patient",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "healthtech",
+    "scheme": "digisolution",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "az.healthtech.patient"
+      "bundleIdentifier": "az.digisolution.patient"
     },
     "android": {
-      "package": "az.healthtech.patient",
+      "package": "az.digisolution.patient",
       "adaptiveIcon": {
         "backgroundColor": "#E6F0FF"
       }
@@ -22,8 +22,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow HealthTech to select a medical document image.",
-          "cameraPermission": "Allow HealthTech to photograph a medical document.",
+          "photosPermission": "Allow DigiSolution to select a medical document image.",
+          "cameraPermission": "Allow DigiSolution to photograph a medical document.",
           "microphonePermission": false
         }
       ]

@@ -50,7 +50,7 @@ export default function Login() {
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={styles.brand}>
         <View style={styles.logo}><MaterialCommunityIcons name="heart-pulse" size={34} color="white"/></View>
-        <Text style={styles.name}>HealthTech</Text>
+        <Text style={styles.name}>DigiSolution</Text>
         <Text style={styles.tagline}>Vahid Sağlamlıq Portalı</Text>
         <View style={styles.demo}><Text style={styles.demoText}>DEMO</Text></View>
       </View>

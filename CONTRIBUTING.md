@@ -1,6 +1,6 @@
-# Contributing to HealthTech
+# Contributing to DigiSolution
 
-HealthTech is a hackathon MVP. Keep changes focused, reproducible, and safe for a public repository containing synthetic data only.
+DigiSolution is a hackathon MVP. Keep changes focused, reproducible, and safe for a public repository containing synthetic data only.
 
 ## Before changing code
 

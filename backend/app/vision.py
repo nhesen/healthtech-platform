@@ -13,7 +13,7 @@ from fastapi import HTTPException
 CV_ROOT = Path(__file__).resolve().parents[2] / "cv_service"
 ANALYZE_CLI = CV_ROOT / "analyze_cli.py"
 MAX_VISION_BYTES = 25 * 1024 * 1024
-ANALYZE_TIMEOUT_SECONDS = 90
+ANALYZE_TIMEOUT_SECONDS = 180
 
 _JPEG = b"\xff\xd8\xff"
 _PNG = b"\x89PNG\r\n\x1a\n"
@@ -83,7 +83,7 @@ def run_pose_analysis(data: bytes, suffix: str) -> dict:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise HTTPException(504, "YOLO Pose analysis timed out.") from exc
+            raise HTTPException(504, "YOLO analysis timed out.") from exc
         payload: dict = {}
         if result_path.exists():
             try:

@@ -120,7 +120,7 @@ def register(app) -> None:
             routing_busy = sum(1 for x in snap if x["er_load_percent"] >= 75)
             from ..population import catalog
             return {
-                "title": "HealthTech Intelligence",
+                "title": "DigiSolution Intelligence",
                 "critical_medication_alerts": critical,
                 "hospital_capacity_percent": caspian["er_load_percent"] if caspian else None,
                 "hospital_load": caspian["load"] if caspian else None,

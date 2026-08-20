@@ -28,13 +28,13 @@ export default function LoginPage(){
     }
   }
 
-  return <main className="flex min-h-screen flex-col bg-canvas">
-    <header className="border-b-4 border-primary bg-white">
+  return <main className="flex min-h-[100dvh] flex-col bg-canvas">
+    <header className="-mt-[env(safe-area-inset-top,0px)] border-b-4 border-primary bg-white pt-[env(safe-area-inset-top,0px)]">
       <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-5 py-4">
         <div className="flex items-center gap-3">
-          <span aria-hidden className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-lg font-black text-white">HT</span>
+          <span aria-hidden className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-lg font-black text-white">DS</span>
           <div>
-            <p className="text-lg font-black leading-tight">HealthTech</p>
+            <p className="text-lg font-black leading-tight">DigiSolution</p>
             <p className="text-xs text-gray-500">Vahid Sağlamlıq Portalı</p>
           </div>
         </div>

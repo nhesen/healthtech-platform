@@ -1,4 +1,4 @@
-# HealthTech documentation
+# DigiSolution documentation
 
 - [Architecture](ARCHITECTURE.md) — components, domains, trust boundaries, data flows, and deployment topology
 - [Demo script](DEMO.md) — deterministic judge walkthrough, reset state, and fallback plan

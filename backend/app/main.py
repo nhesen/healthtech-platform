@@ -276,7 +276,7 @@ async def lifespan(_:FastAPI):
     seed()
     yield
 
-app=FastAPI(title="HealthTech Backbone",version="0.1.0",lifespan=lifespan)
+app=FastAPI(title="DigiSolution Backbone",version="0.1.0",lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[x.strip() for x in os.getenv("CORS_ORIGINS","http://localhost:3000,http://localhost:8081").split(",") if x.strip()],

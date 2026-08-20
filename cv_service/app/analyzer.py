@@ -55,6 +55,10 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
     counts = [item["person_count"] for item in frames] or [0]
     peak = max(counts)
     average = round(sum(counts) / len(counts), 2)
+    peak_index = counts.index(peak) if frames else 0
+    peak_frame = frames[peak_index] if frames else {}
+    empty_seats = int(peak_frame.get("empty_seat_count") or 0)
+    seats_detected = int(peak_frame.get("seat_count") or 0)
     pose_counts: dict[str, int] = {}
     transitions: list[str] = []
     previous_majority = None
@@ -69,18 +73,28 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
     fall_risk = any(item in {"SITTING->STANDING", "LYING->STANDING"} for item in transitions)
     incoming = len(counts) > 1 and counts[-1] > counts[0]
     level = crowding_level(peak)
+    empty_text = (
+        f" Empty seats: {empty_seats} of {seats_detected} detected chairs/benches."
+        if seats_detected else
+        " No chairs or benches were detected, so empty-seat count is 0."
+    )
     return {
         "frames_analyzed": len(frames),
         "peak_people": peak,
         "average_people": average,
+        "empty_seats": empty_seats,
+        "seats_detected": seats_detected,
         "latest_people": frames[-1]["people"] if frames else [],
         "crowding": {
             "level": level,
             "peak_people": peak,
             "average_people": average,
+            "empty_seats": empty_seats,
+            "seats_detected": seats_detected,
             "explanation": (
                 f"YOLO counted a peak of {peak} people in the sampled frames. "
-                f"Density is {level.lower().replace('_', ' ')}. This is occupancy decision support, not a diagnosis."
+                f"Density is {level.lower().replace('_', ' ')}.{empty_text} "
+                "This is occupancy decision support, not a diagnosis."
             ),
         },
         "movement": {
@@ -98,9 +112,37 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def detection_label(item: dict[str, Any]) -> str:
-    score = float(item.get("confidence") or 0)
     name = str(item.get("label") or "person")
+    if name == "empty":
+        return "empty"
+    score = float(item.get("confidence") or 0)
     return f"{name} {int(round(score * 100))}%"
+
+
+def _filled_rounded_rect(image: Any, x1: int, y1: int, x2: int, y2: int, color: tuple[int, int, int], radius: int) -> None:
+    import cv2
+    if x2 <= x1 or y2 <= y1:
+        return
+    radius = int(max(2, min(radius, (x2 - x1) // 3, (y2 - y1) // 3)))
+    cv2.rectangle(image, (x1 + radius, y1), (x2 - radius, y2), color, -1)
+    cv2.rectangle(image, (x1, y1 + radius), (x2, y2 - radius), color, -1)
+    for cx, cy in ((x1 + radius, y1 + radius), (x2 - radius, y1 + radius), (x1 + radius, y2 - radius), (x2 - radius, y2 - radius)):
+        cv2.circle(image, (cx, cy), radius, color, -1)
+
+
+def _rounded_rect_border(image: Any, x1: int, y1: int, x2: int, y2: int, color: tuple[int, int, int], radius: int, thickness: int = 2) -> None:
+    import cv2
+    if x2 <= x1 or y2 <= y1:
+        return
+    radius = int(max(2, min(radius, (x2 - x1) // 3, (y2 - y1) // 3)))
+    cv2.line(image, (x1 + radius, y1), (x2 - radius, y1), color, thickness, cv2.LINE_AA)
+    cv2.line(image, (x1 + radius, y2), (x2 - radius, y2), color, thickness, cv2.LINE_AA)
+    cv2.line(image, (x1, y1 + radius), (x1, y2 - radius), color, thickness, cv2.LINE_AA)
+    cv2.line(image, (x2, y1 + radius), (x2, y2 - radius), color, thickness, cv2.LINE_AA)
+    cv2.ellipse(image, (x1 + radius, y1 + radius), (radius, radius), 180, 0, 90, color, thickness, cv2.LINE_AA)
+    cv2.ellipse(image, (x2 - radius, y1 + radius), (radius, radius), 270, 0, 90, color, thickness, cv2.LINE_AA)
+    cv2.ellipse(image, (x1 + radius, y2 - radius), (radius, radius), 90, 0, 90, color, thickness, cv2.LINE_AA)
+    cv2.ellipse(image, (x2 - radius, y2 - radius), (radius, radius), 0, 0, 90, color, thickness, cv2.LINE_AA)
 
 
 def render_occupancy_overlay(image_bgr: Any, people: list[dict[str, Any]], objects: list[dict[str, Any]] | None = None) -> dict[str, str] | None:
@@ -122,21 +164,33 @@ def render_occupancy_overlay(image_bgr: Any, people: list[dict[str, Any]], objec
     def scaled_box(box: list[float]) -> list[int]:
         return [int(value * scale) for value in box]
 
-    red = (0, 0, 255)
+    seats = [item for item in (objects or []) if item.get("box") and len(item.get("box") or []) >= 4]
+    fill = frame.copy()
+    mint = (96, 188, 72)
+    mint_edge = (48, 150, 42)
+    for item in seats:
+        x1, y1, x2, y2 = scaled_box(item["box"])
+        radius = max(6, min(x2 - x1, y2 - y1) // 5)
+        _filled_rounded_rect(fill, x1, y1, x2, y2, mint, radius)
+    if seats:
+        cv2.addWeighted(fill, 0.38, frame, 0.62, 0, frame)
+    for item in seats:
+        x1, y1, x2, y2 = scaled_box(item["box"])
+        radius = max(6, min(x2 - x1, y2 - y1) // 5)
+        _rounded_rect_border(frame, x1, y1, x2, y2, mint_edge, radius, 2)
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = max(0.55, min(width, height) / 980)
-    thickness = 2
-    detections = list(people) + list(objects or [])
-    for item in detections:
+    person_scale = max(0.55, min(width, height) / 980)
+    red = (0, 0, 255)
+    for item in people:
         box = item.get("box")
         if not box or len(box) < 4:
             continue
         x1, y1, x2, y2 = scaled_box(box)
         cv2.rectangle(frame, (x1, y1), (x2, y2), red, 2)
         text = detection_label(item)
-        (_text_w, text_h), _ = cv2.getTextSize(text, font, font_scale, thickness)
+        (_text_w, text_h), _ = cv2.getTextSize(text, font, person_scale, 2)
         text_y = y1 - 8 if y1 - text_h - 10 > 0 else y1 + text_h + 8
-        cv2.putText(frame, text, (x1, text_y), font, font_scale, red, thickness, cv2.LINE_AA)
+        cv2.putText(frame, text, (x1, text_y), font, person_scale, red, 2, cv2.LINE_AA)
     ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     if not ok:
         return None

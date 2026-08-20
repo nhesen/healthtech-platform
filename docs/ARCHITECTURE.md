@@ -1,8 +1,8 @@
-# HealthTech Architecture
+# DigiSolution Architecture
 
 ## Scope
 
-HealthTech is a healthcare intelligence-layer MVP connecting a patient mobile app, Doctor and Hospital Admin web panels, a shared FastAPI backend, an optional AI provider, and an isolated patient-safety CV service.
+DigiSolution is a healthcare intelligence-layer MVP connecting a patient mobile app, Doctor and Hospital Admin web panels, a shared FastAPI backend, an optional AI provider, and an isolated patient-safety CV service.
 
 It is not an EHR replacement or autonomous medical system. Domain rules and state changes remain deterministic backend responsibilities.
 

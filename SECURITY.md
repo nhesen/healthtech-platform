@@ -2,7 +2,7 @@
 
 ## Hackathon scope
 
-HealthTech is a public hackathon MVP using synthetic data. It is not approved for real patient information, clinical deployment, or medical-device use.
+DigiSolution is a public hackathon MVP using synthetic data. It is not approved for real patient information, clinical deployment, or medical-device use.
 
 ## Report a vulnerability
 

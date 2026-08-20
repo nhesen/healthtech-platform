@@ -1,12 +1,12 @@
-# HealthTech Hackathon Submission Package
+# DigiSolution Hackathon Submission Package
 
 ## One-line description
 
-HealthTech is an AI-assisted healthcare intelligence layer connecting longitudinal patient care, consent-aware clinician workflows, hospital operations, and computer-vision patient safety.
+DigiSolution is an AI-assisted healthcare intelligence layer connecting longitudinal patient care, consent-aware clinician workflows, hospital operations, and computer-vision patient safety.
 
 ## Short description
 
-HealthTech unifies three role-specific experiences around one authoritative backend. Patients can turn medical documents into reviewed longitudinal records, understand trends, find specialists, calculate insurance, book appointments, and control access. Doctors receive appointment-linked, consent-filtered context and reviewable AI support. Hospital teams coordinate bed capacity, discharge blockers, operational tasks, and room-level fall-risk alerts. Live AI and YOLO Pose are optional; deterministic fallbacks keep the hackathon demo reliable.
+DigiSolution unifies three role-specific experiences around one authoritative backend. Patients can turn medical documents into reviewed longitudinal records, understand trends, find specialists, calculate insurance, book appointments, and control access. Doctors receive appointment-linked, consent-filtered context and reviewable AI support. Hospital teams coordinate bed capacity, discharge blockers, operational tasks, and room-level fall-risk alerts. Live AI and YOLO Pose are optional; deterministic fallbacks keep the hackathon demo reliable.
 
 ## Why it matters
 
@@ -95,6 +95,6 @@ These fields are intentionally blank because the repository does not contain ver
 
 ## Suggested repository topics
 
-`healthtech`, `fastapi`, `expo`, `react-native`, `nextjs`, `typescript`, `computer-vision`, `yolo-pose`, `healthcare-ai`, `hackathon`
+`digisolution`, `fastapi`, `expo`, `react-native`, `nextjs`, `typescript`, `computer-vision`, `yolo-pose`, `healthcare-ai`, `hackathon`
 
 GitHub repository topics are currently unset and should be added manually before judging.

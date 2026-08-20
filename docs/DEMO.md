@@ -1,4 +1,4 @@
-# HealthTech Judge Demo
+# DigiSolution Judge Demo
 
 ## Goal
 
@@ -50,7 +50,7 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8000/demo/reset" `
 
 Say:
 
-> HealthTech is a healthcare intelligence layer connecting patient history, clinician context, hospital operations, and patient safety. It supports human decisions and actions; it does not diagnose or replace hospital systems.
+> DigiSolution is a healthcare intelligence layer connecting patient history, clinician context, hospital operations, and patient safety. It supports human decisions and actions; it does not diagnose or replace hospital systems.
 
 Show the three interfaces: Expo Patient, Doctor web, and Hospital Admin web.
 

@@ -1,4 +1,4 @@
-# HealthTech Hackathon Deployment
+# DigiSolution Hackathon Deployment
 
 This runbook deploys the architecture already in this repository:
 

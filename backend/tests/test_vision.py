@@ -56,6 +56,8 @@ def _yolo_payload(**overrides):
         "frames_analyzed": 4,
         "peak_people": 9,
         "average_people": 8.25,
+        "empty_seats": 3,
+        "seats_detected": 12,
         "latest_people": [{"index": 0, "state": "STANDING", "confidence": 0.9}],
         "crowding": {
             "level": "OVERCROWDED",

@@ -13,7 +13,7 @@ const secondary="rounded-xl border border-border bg-white px-4 py-2 text-sm font
 
 export default function Page(){
  const {role,section}=useParams<{role:string;section:string}>();
- if(!DEMO_MODE)return <main className="min-h-screen bg-canvas p-10"><div className="mx-auto max-w-xl rounded-2xl border bg-white p-8"><h1 className="text-3xl font-bold">HealthTech</h1><p className="mt-3 text-gray-600">Demo mode is disabled. Configure production authentication to continue.</p></div></main>;
+ if(!DEMO_MODE)return <main className="min-h-[100dvh] bg-canvas p-10"><div className="mx-auto max-w-xl rounded-2xl border bg-white p-8"><h1 className="text-3xl font-bold">DigiSolution</h1><p className="mt-3 text-gray-600">Demo mode is disabled. Configure production authentication to continue.</p></div></main>;
  return <SessionGate segment={role}>{session=><Section role={role} section={section} session={session}/>}</SessionGate>;
 }
 
@@ -25,7 +25,7 @@ function Section({role,section,session}:{role:string;section:string;session:Sess
  let content=data===undefined?<Skeleton/>:<Cards data={data}/>;
  if(section==="documents")content=<Documents items={data??[]} reload={load}/>;if(section==="safety")content=<Safety items={data??[]} reload={load}/>;if(section==="appointments")content=<Appointments items={data??[]} reload={load}/>;if(section==="permissions")content=<Permissions items={data??[]} reload={load}/>;if(section==="tasks")content=<Tasks items={data??[]} reload={load}/>;if(section==="alerts")content=<Notifications items={data??[]} reload={load}/>;if(section==="consultations")content=<Consultations items={data??[]} reload={load}/>;if(section==="health")content=<Health overview={data}/>;if(section==="analytics")content=<Analytics forecast={data}/>;
  if(section==="intelligence")content=<IntelligenceHome/>;if(section==="medication-safety")content=<MedicationSafety role={role}/>;if(section==="emergency")content=<EmergencyPanel/>;if(section==="routing")content=<RoutingBoard/>;if(section==="resources")content=<ResourceBoard/>;if(section==="epidemics")content=<EpidemicBoard/>;if(section==="break-glass")content=<BreakGlassLog/>;
- return <main className="min-h-screen bg-canvas p-5 md:p-10"><div className="mx-auto max-w-5xl">
+ return <main className="min-h-[100dvh] bg-canvas p-5 md:p-10"><div className="mx-auto max-w-5xl">
   <div className="flex flex-wrap items-center justify-between gap-3">
    <div><a href="/" className="text-sm font-bold text-primary">← Dashboard</a><span className="ml-3 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">DEMO</span></div>
    <div className="flex items-center gap-3"><span className="text-sm text-gray-500">{session.name} · {ROLE_LABELS[session.role]}</span><LogoutButton className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-semibold"/></div>
@@ -69,11 +69,11 @@ function VisionMonitor({reload}:{reload:()=>void}){
   const [status,setStatus]=useState<any>(); const [result,setResult]=useState<any>(); const [busy,setBusy]=useState(false); const [message,setMessage]=useState("");
   useEffect(()=>{api("/cv/vision-status").then(setStatus).catch(()=>setStatus({yolo_active:false,identity_recognition:false}))},[]);
   async function upload(file:File){
-    setBusy(true); setMessage("YOLO Pose is analyzing the scene. The file is discarded after inference.");
+    setBusy(true); setMessage("YOLO is analyzing the scene. The first run can take about a minute.");
     try{
       const form=new FormData(); form.append("file",file); form.append("room_id","204");
       const next=await uploadFile<any>("/cv/analyze",form); setResult(next);
-      setMessage(next.yolo_active?"YOLO finished. Red boxes mark detected people with confidence.":"YOLO Pose is not active.");
+      setMessage(next.yolo_active?"YOLO finished. Red boxes are people; green boxes are empty seats.":"YOLO Pose is not active.");
       reload();
     }catch(error:any){setMessage(error.message||"Analysis failed.")}
     finally{setBusy(false)}
@@ -88,8 +88,8 @@ function VisionMonitor({reload}:{reload:()=>void}){
     <input aria-label="Upload corridor photo or video" className="mt-4 block w-full text-sm" type="file" accept="image/jpeg,image/png,video/mp4,video/quicktime,video/webm" disabled={busy} onChange={event=>{const file=event.target.files?.[0]; if(file) upload(file); event.target.value=""}}/>
     {busy?<p className="mt-3 text-sm font-medium text-primary">Analyzing…</p>:null}
     {message?<p className="mt-3 text-sm text-gray-700">{message}</p>:null}
-    {result?.overlay_image?.base64?<figure className="mt-4"><img alt="YOLO detections with red bounding boxes and confidence labels." className="w-full rounded-xl border" src={`data:${result.overlay_image.mime};base64,${result.overlay_image.base64}`}/><figcaption className="mt-2 text-xs text-gray-500">Qırmızı qutu = aşkarlanan şəxs. Faiz = modelin əminliyi. Şəxsiyyət tanınmır.</figcaption></figure>:null}
-    {result?<dl className="mt-4 grid gap-2 text-sm md:grid-cols-3"><div><dt className="text-gray-500">Density</dt><dd className="font-semibold">{result.crowding?.level} · peak {result.peak_people}</dd></div><div><dt className="text-gray-500">Movement</dt><dd className="font-semibold">{(result.movement?.transitions||[]).join(", ")||"No pose transition"}</dd></div><div><dt className="text-gray-500">Engine</dt><dd className="font-semibold">{result.engine||"inactive"}</dd></div></dl>:null}
+    {result?.overlay_image?.base64?<figure className="mt-4"><img alt="YOLO detections with red people boxes and green empty-seat boxes." className="w-full rounded-xl border" src={`data:${result.overlay_image.mime};base64,${result.overlay_image.base64}`}/><figcaption className="mt-2 text-xs text-gray-500">Qırmızı qutu = şəxs. Yaşıl çərçivə = boş oturacaq.</figcaption></figure>:null}
+    {result?<dl className="mt-4 grid gap-2 text-sm md:grid-cols-4"><div><dt className="text-gray-500">Density</dt><dd className="font-semibold">{result.crowding?.level} · peak {result.peak_people} people</dd></div><div><dt className="text-gray-500">Boş yer</dt><dd className="font-semibold">{result.empty_seats ?? result.crowding?.empty_seats ?? 0}{result.seats_detected || result.crowding?.seats_detected ? ` / ${result.seats_detected ?? result.crowding?.seats_detected}` : ""}</dd></div><div><dt className="text-gray-500">Movement</dt><dd className="font-semibold">{(result.movement?.transitions||[]).join(", ")||"No pose transition"}</dd></div><div><dt className="text-gray-500">Engine</dt><dd className="font-semibold">{result.engine||"inactive"}</dd></div></dl>:null}
     {result?.crowding?.explanation?<p className="mt-3 text-sm text-gray-600">{result.crowding.explanation}</p>:null}
     {result?.movement?.explanation?<p className="mt-1 text-sm text-gray-600">{result.movement.explanation}</p>:null}
   </Card></div>;

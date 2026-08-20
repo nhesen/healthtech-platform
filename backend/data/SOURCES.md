@@ -1,4 +1,4 @@
-# Open datasets bundled with HealthTech
+# Open datasets bundled with DigiSolution
 
 ## NHANES 2021–2023 Complete Blood Count
 

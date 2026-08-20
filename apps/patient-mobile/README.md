@@ -1,4 +1,4 @@
-# HealthTech Mobile
+# DigiSolution Mobile
 
 Expo SDK 54, React Native, TypeScript, and Expo Router application for all three demo roles — citizen, clinician, and hospital operations. It consumes the existing FastAPI APIs and uses only Expo Go-compatible modules.
 

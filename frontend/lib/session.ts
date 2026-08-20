@@ -3,7 +3,7 @@
 export type SessionRole = "PATIENT" | "DOCTOR" | "HOSPITAL_ADMIN";
 export interface Session { id: string; name: string; email: string; role: SessionRole }
 
-const KEY = "healthtech.web.session";
+const KEY = "digisolution.web.session";
 
 export const ROLE_LABELS: Record<SessionRole, string> = { PATIENT: "Vətəndaş", DOCTOR: "Həkim", HOSPITAL_ADMIN: "Xəstəxana" };
 export const ROLE_SEGMENTS: Record<SessionRole, string> = { PATIENT: "patient", DOCTOR: "doctor", HOSPITAL_ADMIN: "admin" };

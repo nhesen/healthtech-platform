@@ -14,9 +14,9 @@ function authHeaders(extra?:Record<string,string>):Record<string,string>{return{
 
 async function fetchApi(path:string,init:RequestInit={}){
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),path.startsWith("/documents")||path.startsWith("/cv/analyze")?120000:20000);
+  const timer=setTimeout(()=>controller.abort(),path.startsWith("/documents")||path.startsWith("/cv/analyze")?180000:20000);
   try{return await fetch(`${API_BASE}${path}`,{...init,signal:controller.signal})}
-  catch{throw new ApiError(0,"Unable to connect to the HealthTech service.")}
+  catch{throw new ApiError(0,"Unable to connect to the DigiSolution service.")}
   finally{clearTimeout(timer)}
 }
 async function checked<T>(res:Response):Promise<T>{

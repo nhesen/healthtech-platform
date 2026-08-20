@@ -82,7 +82,11 @@ def _person_center(points: list[list[float]], box: list[float] | None) -> list[f
     return None
 
 
-def people_from_detect(result: Any, min_conf: float = 0.15) -> list[dict[str, Any]]:
+SEAT_LABELS = {"chair", "bench", "couch"}
+OCCUPANCY_CLASSES = [0, 13, 56, 57]
+
+
+def detections_from_result(result: Any, labels: set[str] | None = None, min_conf: float = 0.15) -> list[dict[str, Any]]:
     if result.boxes is None or getattr(result.boxes, "xyxy", None) is None:
         return []
     xyxy = result.boxes.xyxy.cpu().tolist()
@@ -91,30 +95,215 @@ def people_from_detect(result: Any, min_conf: float = 0.15) -> list[dict[str, An
     confs = result.boxes.conf.cpu().tolist() if result.boxes.conf is not None else [1.0] * len(xyxy)
     classes = result.boxes.cls.cpu().tolist() if result.boxes.cls is not None else [0] * len(xyxy)
     names = result.names or {}
-    people = []
+    items = []
     for index, box in enumerate(xyxy):
         cls_id = int(classes[index])
         if isinstance(names, dict):
-            name = names.get(cls_id, "person")
+            name = str(names.get(cls_id, "object"))
         elif isinstance(names, (list, tuple)) and 0 <= cls_id < len(names):
-            name = names[cls_id]
+            name = str(names[cls_id])
         else:
-            name = "person"
-        if str(name).lower() != "person":
+            name = "object"
+        label = name.lower()
+        if labels is not None and label not in labels:
             continue
         score = float(confs[index] if index < len(confs) else 0)
         if score < min_conf:
             continue
         center = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2]
-        people.append({
-            "index": len(people),
-            "label": "person",
-            "state": "UNKNOWN",
+        items.append({
+            "index": len(items),
+            "label": label,
+            "state": "UNKNOWN" if label == "person" else "EMPTY",
             "confidence": round(score, 3),
             "box": [round(float(value), 1) for value in box],
             "center": [round(float(center[0]), 1), round(float(center[1]), 1)],
         })
-    return people
+    return items
+
+
+def people_from_detect(result: Any, min_conf: float = 0.15) -> list[dict[str, Any]]:
+    return detections_from_result(result, {"person"}, min_conf)
+
+
+def seats_from_detect(result: Any, min_conf: float = 0.12) -> list[dict[str, Any]]:
+    return detections_from_result(result, SEAT_LABELS, min_conf)
+
+
+def _box(item: dict[str, Any]) -> list[float] | None:
+    box = item.get("box")
+    if not box or len(box) < 4:
+        return None
+    return [float(box[0]), float(box[1]), float(box[2]), float(box[3])]
+
+
+def typical_person_size(people: list[dict[str, Any]], image_size: tuple[int, int]) -> tuple[float, float]:
+    widths = []
+    heights = []
+    for person in people:
+        box = _box(person)
+        if not box:
+            continue
+        widths.append(box[2] - box[0])
+        heights.append(box[3] - box[1])
+    if widths:
+        widths.sort()
+        heights.sort()
+        mid = len(widths) // 2
+        return max(widths[mid], 8.0), max(heights[mid], 8.0)
+    width, height = image_size if image_size[0] > 0 else (1280, 720)
+    return width * 0.08, height * 0.28
+
+
+def nms_detections(items: list[dict[str, Any]], iou_thresh: float = 0.4) -> list[dict[str, Any]]:
+    ordered = sorted(items, key=lambda item: float(item.get("confidence") or 0), reverse=True)
+    kept: list[dict[str, Any]] = []
+    for item in ordered:
+        box = _box(item)
+        if not box:
+            continue
+        if any(box_iou(box, other["box"]) >= iou_thresh for other in kept if other.get("box")):
+            continue
+        kept.append(item)
+    return kept
+
+
+def filter_furniture_boxes(
+    seats: list[dict[str, Any]],
+    people: list[dict[str, Any]],
+    image_size: tuple[int, int],
+) -> list[dict[str, Any]]:
+    width, height = image_size if image_size[0] > 0 else (1, 1)
+    person_w, person_h = typical_person_size(people, (width, height))
+    kept = []
+    for item in seats:
+        box = _box(item)
+        if not box:
+            continue
+        bw, bh = box[2] - box[0], box[3] - box[1]
+        if bw <= 1 or bh <= 1:
+            continue
+        cy = (box[1] + box[3]) / 2
+        if height > 1 and cy < height * 0.16:
+            continue
+        if bw < person_w * 0.32 or bh < person_h * 0.18:
+            continue
+        if width * height > 1 and bw * bh > 0.55 * width * height:
+            continue
+        if bh > bw * 3.8:
+            continue
+        if float(item.get("confidence") or 0) < 0.2:
+            continue
+        kept.append(item)
+    return kept
+
+
+def seat_cushion_size(people: list[dict[str, Any]], image_size: tuple[int, int]) -> tuple[float, float]:
+    width, height = image_size if image_size[0] > 0 else (1280, 720)
+    person_w, _person_h = typical_person_size(people, (width, height))
+    seat_w = min(max(person_w * 0.82, width * 0.045), width * 0.16)
+    seat_h = min(max(seat_w * 0.58, height * 0.045), height * 0.12)
+    return seat_w, seat_h
+
+
+def _canonical_seat(center_x: float, bottom: float, seat_w: float, seat_h: float, confidence: float, image_size: tuple[int, int]) -> dict[str, Any]:
+    width, height = image_size
+    x1 = center_x - seat_w / 2
+    x2 = center_x + seat_w / 2
+    y2 = bottom
+    y1 = bottom - seat_h
+    box = [
+        round(max(0.0, x1), 1),
+        round(max(0.0, y1), 1),
+        round(min(float(width - 1), x2), 1) if width > 1 else round(x2, 1),
+        round(min(float(height - 1), y2), 1) if height > 1 else round(y2, 1),
+    ]
+    return {
+        "label": "empty",
+        "state": "EMPTY",
+        "confidence": round(float(confidence), 3),
+        "box": box,
+        "center": [round((box[0] + box[2]) / 2, 1), round((box[1] + box[3]) / 2, 1)],
+    }
+
+
+def nms_by_center(items: list[dict[str, Any]], min_dist: float) -> list[dict[str, Any]]:
+    ordered = sorted(items, key=lambda item: float(item.get("confidence") or 0), reverse=True)
+    kept: list[dict[str, Any]] = []
+    for item in ordered:
+        center = item.get("center")
+        if not center:
+            continue
+        if any(((center[0] - other["center"][0]) ** 2 + (center[1] - other["center"][1]) ** 2) ** 0.5 < min_dist for other in kept):
+            continue
+        kept.append(item)
+    return kept
+
+
+def snap_seat_rows(items: list[dict[str, Any]], row_tol: float) -> list[dict[str, Any]]:
+    if not items:
+        return items
+    rows: list[dict[str, Any]] = []
+    for item in sorted(items, key=lambda seat: seat["box"][3]):
+        bottom = item["box"][3]
+        matched = None
+        for row in rows:
+            if abs(row["y"] - bottom) <= row_tol:
+                matched = row
+                break
+        if matched is None:
+            rows.append({"y": bottom, "items": [item]})
+            continue
+        matched["items"].append(item)
+        matched["y"] = sum(seat["box"][3] for seat in matched["items"]) / len(matched["items"])
+    snapped = []
+    for row in rows:
+        for item in row["items"]:
+            box = item["box"]
+            height = box[3] - box[1]
+            new_box = [box[0], round(row["y"] - height, 1), box[2], round(row["y"], 1)]
+            snapped.append({
+                **item,
+                "box": new_box,
+                "center": [round((new_box[0] + new_box[2]) / 2, 1), round((new_box[1] + new_box[3]) / 2, 1)],
+            })
+    return snapped
+
+
+def sitting_slots_from_furniture(
+    seats: list[dict[str, Any]],
+    people: list[dict[str, Any]],
+    image_size: tuple[int, int],
+) -> list[dict[str, Any]]:
+    width, height = image_size if image_size and image_size[0] > 0 else (1280, 720)
+    seat_w, seat_h = seat_cushion_size(people, (width, height))
+    furniture = nms_detections(filter_furniture_boxes(seats, people, (width, height)), 0.45)
+    frames: list[dict[str, Any]] = []
+    for item in furniture:
+        box = _box(item)
+        if not box:
+            continue
+        bw, bh = box[2] - box[0], box[3] - box[1]
+        label = str(item.get("label") or "chair")
+        if label == "chair" and bw < seat_w * 1.85:
+            count = 1
+        else:
+            count = max(1, min(8, int(round(bw / (seat_w * 1.15)))))
+        inset = bw * 0.1 if count > 1 else 0.0
+        left, right = box[0] + inset, box[2] - inset
+        bottom = box[3] - bh * 0.08
+        if count == 1:
+            xs = [(box[0] + box[2]) / 2]
+        else:
+            span = max(right - left, seat_w)
+            xs = [left + (index + 0.5) * span / count for index in range(count)]
+        for center_x in xs:
+            frames.append(_canonical_seat(center_x, bottom, seat_w, seat_h, float(item.get("confidence") or 0), (width, height)))
+    aligned = snap_seat_rows(frames, seat_h * 0.75)
+    cleaned = nms_by_center(aligned, seat_w * 0.62)
+    for index, item in enumerate(cleaned):
+        item["index"] = index
+    return cleaned[:40]
 
 
 def box_iou(a: list[float], b: list[float]) -> float:
@@ -127,6 +316,33 @@ def box_iou(a: list[float], b: list[float]) -> float:
         return 0.0
     area = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
     return inter / area if area else 0.0
+
+
+def person_occupies_seat(person: dict[str, Any], seat: dict[str, Any]) -> bool:
+    pbox = person.get("box")
+    sbox = seat.get("box")
+    if not pbox or not sbox or len(pbox) < 4 or len(sbox) < 4:
+        return False
+    sit_x = (pbox[0] + pbox[2]) / 2
+    sit_y = pbox[1] + 0.7 * (pbox[3] - pbox[1])
+    pad_x = max(8.0, (sbox[2] - sbox[0]) * 0.18)
+    pad_y = max(8.0, (sbox[3] - sbox[1]) * 0.22)
+    if sbox[0] - pad_x <= sit_x <= sbox[2] + pad_x and sbox[1] - pad_y <= sit_y <= sbox[3] + pad_y:
+        return True
+    sit_region = [pbox[0], pbox[1] + 0.55 * (pbox[3] - pbox[1]), pbox[2], pbox[3]]
+    return box_iou(sit_region, sbox) >= 0.12
+
+
+def empty_seats_from_people(people: list[dict[str, Any]], seats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    empty = []
+    for seat in seats:
+        if any(person_occupies_seat(person, seat) for person in people):
+            continue
+        item = dict(seat)
+        item["label"] = "empty"
+        item["state"] = "EMPTY"
+        empty.append(item)
+    return empty
 
 
 def merge_pose_into_detect(detected: list[dict[str, Any]], posed: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -160,18 +376,43 @@ class PoseDetector:
             from ultralytics import YOLO
         except ImportError as exc:
             raise RuntimeError("Install cv_service/requirements-vision.txt for YOLO video mode") from exc
+        self._YOLO = YOLO
         self.device = os.getenv("CV_DEVICE", "cpu")
-        self.imgsz = int(os.getenv("CV_IMGSZ", "960"))
-        self.conf = float(os.getenv("CV_CONF", "0.15"))
-        self.pose = YOLO(model_name or os.getenv("CV_MODEL") or os.getenv("YOLO_POSE_MODEL", "yolo11n-pose.pt"))
-        self.detect = YOLO(os.getenv("CV_DETECT_MODEL", "yolo11n.pt"))
-        self.model = self.pose
+        self.imgsz = int(os.getenv("CV_IMGSZ", "1280"))
+        self.conf = float(os.getenv("CV_CONF", "0.12"))
+        self._pose_name = model_name or os.getenv("CV_MODEL") or os.getenv("YOLO_POSE_MODEL", "yolo11n-pose.pt")
+        self._detect_name = os.getenv("CV_DETECT_MODEL", "yolo11s.pt")
+        self._pose = None
+        self._detect = None
+        self.model = None
 
-    def _kwargs(self) -> dict:
-        return {"verbose": False, "save": False, "device": self.device, "imgsz": self.imgsz, "conf": self.conf, "iou": 0.45}
+    @property
+    def pose(self):
+        if self._pose is None:
+            self._pose = self._YOLO(self._pose_name)
+            self.model = self._pose
+        return self._pose
+
+    @property
+    def detect(self):
+        if self._detect is None:
+            self._detect = self._YOLO(self._detect_name)
+        return self._detect
+
+    def _kwargs(self, classes: list[int] | None = None) -> dict:
+        return {
+            "verbose": False,
+            "save": False,
+            "device": self.device,
+            "imgsz": self.imgsz,
+            "conf": self.conf,
+            "iou": 0.6,
+            "max_det": 300,
+            "classes": classes if classes is not None else [0],
+        }
 
     def states(self, source: str | int, frame_skip: int = 2) -> Iterator[tuple[str, float]]:
-        for index, result in enumerate(self.pose.predict(source=source, stream=True, **self._kwargs())):
+        for index, result in enumerate(self.pose.predict(source=source, stream=True, **self._kwargs([0]))):
             if index % max(1, frame_skip):
                 continue
             people = people_from_result(result)
@@ -181,22 +422,38 @@ class PoseDetector:
             lead = max(people, key=lambda item: item["confidence"])
             yield lead["state"], lead["confidence"]
 
-    def analyze(self, source: str, frame_skip: int = 2, max_frames: int = 40) -> tuple[list[dict], tuple[Any, list[dict]] | None]:
-        skip = 1 if str(source).lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp")) else max(1, frame_skip)
+    def analyze(self, source: str, frame_skip: int = 2, max_frames: int = 8) -> tuple[list[dict], tuple[Any, list[dict]] | None]:
+        is_image = str(source).lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp"))
+        skip = 1 if is_image else max(2, frame_skip)
         frames = []
         preview = None
         best = -1
-        for index, result in enumerate(self.detect.predict(source=source, stream=True, **self._kwargs())):
+        for index, result in enumerate(self.detect.predict(source=source, stream=True, **self._kwargs(OCCUPANCY_CLASSES))):
             if index % skip:
                 continue
             people = people_from_detect(result, self.conf)
-            if result.orig_img is not None:
-                posed = people_from_result(self.pose.predict(source=result.orig_img, **self._kwargs())[0])
+            shape = getattr(result.orig_img, "shape", None)
+            image_size = (int(shape[1]), int(shape[0])) if shape is not None and len(shape) >= 2 else (0, 0)
+            seats = sitting_slots_from_furniture(
+                seats_from_detect(result, max(self.conf, 0.2)),
+                people,
+                image_size,
+            )
+            if not is_image and result.orig_img is not None:
+                posed = people_from_result(self.pose.predict(source=result.orig_img, **self._kwargs([0]))[0])
                 people = merge_pose_into_detect(people, posed)
-            frames.append({"index": index, "person_count": len(people), "people": people})
+            empty = empty_seats_from_people(people, seats)
+            frames.append({
+                "index": index,
+                "person_count": len(people),
+                "people": people,
+                "seat_count": len(seats),
+                "empty_seat_count": len(empty),
+                "empty_seats": empty,
+            })
             if result.orig_img is not None and len(people) >= best:
-                preview = (result.orig_img.copy(), people)
+                preview = (result.orig_img.copy(), people, empty)
                 best = len(people)
-            if len(frames) >= max_frames:
+            if len(frames) >= (1 if is_image else max_frames):
                 break
         return frames, preview

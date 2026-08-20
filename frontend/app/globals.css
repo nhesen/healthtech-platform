@@ -1,2 +1,16 @@
-@tailwind base; @tailwind components; @tailwind utilities;
-* { box-sizing: border-box; } body { margin:0; background:#F6F8FC; color:#111827; font-family:Arial, sans-serif; }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+* { box-sizing: border-box; }
+html { height: 100%; }
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: #F6F8FC;
+  color: #111827;
+  font-family: Arial, sans-serif;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}

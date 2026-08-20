@@ -1,16 +1,16 @@
-# HealthTech Platform
+# DigiSolution Platform
 
 > An AI-assisted healthcare intelligence layer for continuous patient care, clinician decision support, hospital operations, and patient safety.
 
 **Patient Mobile -> Doctor Web -> Hospital Operations -> Patient Safety**
 
-HealthTech connects longitudinal patient records, consent-aware clinical context, appointment and insurance workflows, operational capacity data, and computer-vision safety events through one FastAPI backbone. It is a hackathon MVP built entirely with synthetic medical data and designed to support human decisions, not replace them.
+DigiSolution connects longitudinal patient records, consent-aware clinical context, appointment and insurance workflows, operational capacity data, and computer-vision safety events through one FastAPI backbone. It is a hackathon MVP built entirely with synthetic medical data and designed to support human decisions, not replace them.
 
 [Architecture](docs/ARCHITECTURE.md) | [Demo script](docs/DEMO.md) | [Deployment](DEPLOYMENT.md) | [Submission package](docs/SUBMISSION.md) | [Contributing](CONTRIBUTING.md)
 
 ## Overview
 
-Healthcare workflows often fragment information across patient files, clinician tools, scheduling systems, operational dashboards, and safety processes. HealthTech demonstrates a connected intelligence layer that turns structured events into explainable insights and then into permissioned, auditable actions.
+Healthcare workflows often fragment information across patient files, clinician tools, scheduling systems, operational dashboards, and safety processes. DigiSolution demonstrates a connected intelligence layer that turns structured events into explainable insights and then into permissioned, auditable actions.
 
 The core loop is:
 
@@ -30,7 +30,7 @@ The platform does not claim to replace an EHR, diagnose conditions, prescribe tr
 
 ## Solution
 
-HealthTech provides the right information to the right role at the right time:
+DigiSolution provides the right information to the right role at the right time:
 
 - Patients receive a longitudinal view of their health, explainable trend summaries, care navigation, booking, and explicit data controls.
 - Doctors receive appointment-linked, consent-filtered clinical context and reviewable AI drafts.
@@ -154,7 +154,7 @@ The service performs no face recognition, identity recognition, diagnosis, or au
 The deterministic demo tells one connected story:
 
 1. Hasan Nurmammadov uploads a lab report and confirms extracted complete blood count values.
-2. HealthTech shows the 02.09.2025 → 10.08.2026 CBC differences and suggests hematology review without diagnosing.
+2. DigiSolution shows the 02.09.2025 → 10.08.2026 CBC differences and suggests hematology review without diagnosing.
 3. Hasan books Dr. Leyla Mammadova: `60 AZN`, `48 AZN` covered, `12 AZN` patient payment.
 4. Hasan grants time-limited categories; the Doctor panel can then open the relevant brief.
 5. The doctor reviews and approves a consultation note.
@@ -169,7 +169,7 @@ Follow the judge-ready [Demo Script](docs/DEMO.md). Product screenshot targets a
 ## Repository structure
 
 ```text
-healthtech-platform/
+DigiSolution/
 |-- apps/
 |   `-- patient-mobile/    Expo application for all three roles
 |-- backend/               FastAPI API, database, AI, documents, seed, tests
@@ -350,6 +350,6 @@ See [SECURITY.md](SECURITY.md) for the public-repository policy and reporting gu
 
 ## Hackathon and team
 
-HealthTech is a hackathon MVP maintained in the public [`nhesen/healthtech-platform`](https://github.com/nhesen/healthtech-platform) repository. Add final event, team-member, public URL, slide-deck, and demo-video details to [the submission checklist](docs/SUBMISSION.md) before judging.
+DigiSolution is a hackathon MVP maintained in the public [`nhesen/healthtech-platform`](https://github.com/nhesen/healthtech-platform) repository. Add final event, team-member, public URL, slide-deck, and demo-video details to [the submission checklist](docs/SUBMISSION.md) before judging.
 
 This project contains synthetic demonstration data only and is not a medical device.
