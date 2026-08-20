@@ -41,6 +41,9 @@ class ClinicalCategory(str,Enum):
     DERMATOLOGY="DERMATOLOGY"
     DISCHARGE_RECORDS="DISCHARGE_RECORDS"
 
+FIN_LENGTH=7
+DEMO_FIN_DIRECTORY:dict[str,tuple[str,str]]={"1AZ0001":("patient@demo.az","PATIENT"),"2AZ0002":("doctor@demo.az","DOCTOR"),"3AZ0003":("admin@demo.az","HOSPITAL_ADMIN")}
+
 def demo_enabled()->bool:
     return os.getenv("DEMO_MODE","true").lower() in {"1","true","yes"}
 def enforce_rate(key:str,limit:int,window_seconds:int)->None:
@@ -288,6 +291,7 @@ class LabResultIn(BaseModel): test_name:str=Field(min_length=1,max_length=100); 
 class DocumentConfirmIn(BaseModel): results:list[LabResultIn]=Field(default_factory=list,max_length=100); report_date:date|None=None; source_name:str|None=Field(None,max_length=200)
 class DocumentReviewIn(BaseModel): results:list[LabResultIn]=Field(max_length=100); report_date:date|None=None; source_name:str|None=Field(None,max_length=200)
 class TaskUpdateIn(BaseModel): status:Literal["IN_PROGRESS"]; assigned_role:Literal["DOCTOR","HOSPITAL_ADMIN","NURSE","PHARMACY"]|None=None
+class LoginIn(BaseModel): fin:str=Field(min_length=FIN_LENGTH,max_length=FIN_LENGTH,pattern=r"^[0-9A-Za-z]{7}$"); role:Role
 
 @app.get("/health")
 def health():
@@ -309,6 +313,20 @@ def me(user:DemoUser=Depends(current_user)): return user
 def accounts():
     if not demo_enabled(): raise HTTPException(404,"Not found")
     with db() as conn: return rows(conn.execute("SELECT name,email,role FROM users WHERE email IN ('patient@demo.az','doctor@demo.az','admin@demo.az')").fetchall())
+@app.post("/auth/login")
+def login(payload:LoginIn):
+    """Resolve a synthetic FIN and role to the demo identity used by the X-Demo-User header."""
+    if not demo_enabled(): raise HTTPException(404,"Not found")
+    fin=payload.fin.strip().upper()
+    enforce_rate("login",30,60)
+    entry=DEMO_FIN_DIRECTORY.get(fin)
+    if not entry or entry[1]!=payload.role.value: raise HTTPException(status.HTTP_401_UNAUTHORIZED,"FIN və ya rol yanlışdır")
+    email,_=entry
+    with db() as conn:
+        user=one(conn,"SELECT id,name,email,role FROM users WHERE email=?",(email,))
+        if not user: raise HTTPException(status.HTTP_401_UNAUTHORIZED,"FIN və ya rol yanlışdır")
+        audit(conn,user["id"],"DEMO_LOGIN","user",user["id"],{"role":user["role"]})
+    return DemoUser(**user)
 @app.get("/patients/{patient_id}")
 def patient(patient_id:str,user:DemoUser=Depends(current_user)):
     with db() as conn:
@@ -422,6 +440,16 @@ def lab_comparison(patient_id:str,from_date:date,to_date:date,user:DemoUser=Depe
             if old and new: result.append({"metric":metric,"from":old,"to":new,"change":round(new["value"]-old["value"],2),"direction":"up" if new["value"]>old["value"] else "down" if new["value"]<old["value"] else "same"})
         changed=[x["metric"] for x in result if x["change"]]
         return {"from_date":from_value,"to_date":to_value,"metrics":result,"explanation":f"{len(changed)} metrics changed between these tests. This comparison does not provide a diagnosis."}
+@app.get("/insurance/plan")
+def insurance_plan(patient_id:str,user:DemoUser=Depends(require("PATIENT"))):
+    """Coverage percentages the patient's plan applies per service, straight from insurance_coverage."""
+    with db() as conn:
+        clinical_access(conn,patient_id,user)
+        patient=one(conn,"SELECT insurance_plan FROM patients WHERE id=?",(patient_id,))
+        if not patient: raise HTTPException(404,"Patient not found")
+        plan=patient["insurance_plan"]; plan_row=one(conn,"SELECT name FROM insurance_plans WHERE id=?",(plan,))
+        coverage=rows(conn.execute("SELECT service,coverage_percent FROM insurance_coverage WHERE plan_id=? ORDER BY coverage_percent DESC,service",(plan,)).fetchall())
+        return {"plan":plan,"plan_name":plan_row["name"] if plan_row else plan,"coverage":coverage}
 @app.get("/doctors")
 def doctor_directory(specialty:str|None=None,q:str|None=None,hospital_id:str|None=None,max_price:float|None=None):
     with db() as conn:
@@ -712,7 +740,13 @@ def mark_one_read(notification_id:str,user:DemoUser=Depends(current_user)):
         return {"id":notification_id,"status":"read"}
 @app.get("/safety/events")
 def safety_events(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
-    with db() as conn:return rows(conn.execute("SELECT e.*,d.patient_state,d.previous_state,d.status,d.acknowledged_at,d.resolved_at FROM cv_events e LEFT JOIN safety_event_details d ON d.event_id=e.id WHERE e.hospital_id=? ORDER BY e.occurred_at DESC",(hospital_scope(conn,user),)).fetchall())
+    with db() as conn:
+        hospital_id=hospital_scope(conn,user)
+        events=rows(conn.execute("SELECT e.*,d.patient_state,d.previous_state,d.status,d.acknowledged_at,d.resolved_at FROM cv_events e LEFT JOIN safety_event_details d ON d.event_id=e.id WHERE e.hospital_id=? ORDER BY e.occurred_at DESC",(hospital_id,)).fetchall())
+        grouped:dict[str,list[dict[str,Any]]]=defaultdict(list)
+        for task in rows(conn.execute("SELECT id,event_id,room_id,title,assigned_role,priority,status,created_at,completed_at FROM safety_tasks WHERE event_id IN (SELECT id FROM cv_events WHERE hospital_id=?) ORDER BY created_at DESC",(hospital_id,)).fetchall()): grouped[task["event_id"]].append(task)
+        for event in events: event["nurse_tasks"]=grouped.get(event["id"],[])
+        return events
 @app.patch("/cv-events/{event_id}/acknowledge")
 def acknowledge_event(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:

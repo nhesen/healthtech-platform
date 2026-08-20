@@ -3,11 +3,11 @@ import { Tabs } from "expo-router";
 import { RoleGate } from "@/components/RoleGate";
 import { colors } from "@/constants/theme";
 
-const icons: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = { index: "home-variant", health: "heart-pulse", doctors: "doctor", appointments: "calendar-clock", profile: "account-circle" };
-export default function TabsLayout() {
-  return <RoleGate role="PATIENT">
+const icons: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = { index: "view-dashboard-outline", tasks: "clipboard-check-outline", safety: "shield-alert-outline", analytics: "chart-line", profile: "account-circle" };
+export default function AdminLayout() {
+  return <RoleGate role="HOSPITAL_ADMIN">
     <Tabs screenOptions={({ route }) => ({ headerShown: false, tabBarActiveTintColor: colors.primary, tabBarInactiveTintColor: colors.secondary, tabBarStyle: { height: 72, paddingTop: 8, paddingBottom: 10, borderTopColor: colors.border, backgroundColor: colors.card }, tabBarLabelStyle: { fontSize: 11, fontWeight: "700" }, tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name={icons[route.name]} size={size + 1} color={color}/> })}>
-      <Tabs.Screen name="index" options={{ title: "Home" }}/><Tabs.Screen name="health" options={{ title: "Health" }}/><Tabs.Screen name="doctors" options={{ title: "Doctors" }}/><Tabs.Screen name="appointments" options={{ title: "Appointments" }}/><Tabs.Screen name="profile" options={{ title: "Profile" }}/>
+      <Tabs.Screen name="index" options={{ title: "Command" }}/><Tabs.Screen name="tasks" options={{ title: "Tasks" }}/><Tabs.Screen name="safety" options={{ title: "Safety" }}/><Tabs.Screen name="analytics" options={{ title: "Analytics" }}/><Tabs.Screen name="profile" options={{ title: "Profile" }}/>
     </Tabs>
   </RoleGate>;
 }

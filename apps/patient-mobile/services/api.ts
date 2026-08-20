@@ -1,10 +1,11 @@
-import type { DocumentUpload, ExtractedLab } from "@/types/api";
+import { sessionEmail } from "@/services/session";
+import type { DemoUser, DocumentUpload, ExtractedLab } from "@/types/api";
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 export const DEMO_MODE = process.env.EXPO_PUBLIC_DEMO_MODE !== "false";
 const API_TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? "20000");
 export const PATIENT_ID = "patient_hasan";
-const DEMO_EMAIL = "patient@demo.az";
+export const HOSPITAL_ID = "hospital_caspian";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -22,8 +23,10 @@ async function responseError(response: Response): Promise<never> {
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   ensureConfigured();
+  const email = await sessionEmail();
+  if (!email) throw new ApiError(401, "Sessiya bitmişdir. Yenidən daxil olun.");
   const headers = new Headers(init.headers);
-  headers.set("X-Demo-User", DEMO_EMAIL);
+  headers.set("X-Demo-User", email);
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   const controller = new AbortController();
   const timeoutMs = path.startsWith("/documents") ? Math.max(API_TIMEOUT_MS, 60000) : API_TIMEOUT_MS;
@@ -36,6 +39,28 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (error instanceof ApiError) throw error;
     if (controller.signal.aborted) throw new ApiError(0, "The HealthTech service took too long to respond. Please try again.");
     throw new ApiError(0, "Unable to connect to the HealthTech service.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** FIN sign-in. Runs before a session exists, so it does not send the X-Demo-User header. */
+export async function login(fin: string, role: string): Promise<DemoUser> {
+  ensureConfigured();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_URL}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fin, role }), signal: controller.signal });
+    if (response.status === 401) throw new ApiError(401, "FIN və ya rol yanlışdır.");
+    if (response.status === 404) throw new ApiError(404, "Demo girişi bağlıdır.");
+    if (response.status === 422) throw new ApiError(422, "FIN 7 simvoldan ibarət olmalıdır.");
+    if (response.status === 429) throw new ApiError(429, "Çox sayda cəhd. Bir az sonra yenidən yoxlayın.");
+    if (!response.ok) return responseError(response);
+    return response.json() as Promise<DemoUser>;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (controller.signal.aborted) throw new ApiError(0, "Xidmət cavab vermədi. Yenidən yoxlayın.");
+    throw new ApiError(0, "HealthTech xidmətinə qoşulmaq mümkün olmadı.");
   } finally {
     clearTimeout(timer);
   }

@@ -29,6 +29,12 @@ cv_service/runs/
 cv_service/output/
 .ultralytics/
 
+# Locally downloaded Expo Go builds
+*.apk
+
+# Stale duplicate of this project kept only as a local backup
+healthtech-platform/
+
 # Logs, editors, and operating-system noise
 *.log
 *.tmp

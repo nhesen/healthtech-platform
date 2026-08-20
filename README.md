@@ -39,9 +39,9 @@ HealthTech provides the right information to the right role at the right time:
 
 ## Product interfaces
 
-### Patient Mobile App
+### Mobile App
 
-The patient experience is a native Expo / React Native application in [`apps/patient-mobile`](apps/patient-mobile).
+All three roles sign in to the native Expo / React Native application in [`apps/patient-mobile`](apps/patient-mobile); the FIN screen routes each role to its own gated section. The citizen journey covers:
 
 - Personal health overview and longitudinal timeline
 - Lab trends and comparison views
@@ -53,9 +53,11 @@ The patient experience is a native Expo / React Native application in [`apps/pat
 - Time-limited category consent and revocation
 - Queue position, post-discharge check-ins, and notifications
 
-### Doctor Web Panel
+Clinician and hospital-operations roles have mobile sections mirroring the web panels below: a clinic list with the consultation workspace, and a capacity command centre with the discharge task chain, safety board, and analytics.
 
-The clinician interface is part of the Next.js application in [`frontend`](frontend).
+### Doctor Panel
+
+The clinician interface exists both in the mobile app and in the Next.js application in [`frontend`](frontend).
 
 - Daily patients, appointments, and alerts
 - Appointment-relationship and consent-aware patient access
@@ -64,9 +66,9 @@ The clinician interface is part of the Next.js application in [`frontend`](front
 - Missing-information warnings
 - Clinician approval before final notes enter the timeline
 
-### Hospital Admin Web Panel
+### Hospital Admin Panel
 
-The operational interface shares the same Next.js deployment.
+The operational interface is available in the mobile app and in the same Next.js deployment.
 
 - Command center and 200-bed capacity view
 - Department, bed, and patient-flow status
@@ -115,7 +117,7 @@ See [Architecture Documentation](docs/ARCHITECTURE.md) for component boundaries,
 
 | Layer | Technology |
 |---|---|
-| Patient mobile | Expo SDK 54, React Native 0.81, TypeScript, Expo Router |
+| Mobile (all roles) | Expo SDK 54, React Native 0.81, TypeScript, Expo Router |
 | Doctor/Admin web | Next.js 15, React 19, TypeScript, Tailwind CSS |
 | API | FastAPI, Pydantic, Uvicorn, Python 3.11+ |
 | Database | SQLite locally; PostgreSQL/Supabase through `DATABASE_URL` |
@@ -162,7 +164,7 @@ Follow the judge-ready [Demo Script](docs/DEMO.md). Product screenshot targets a
 ```text
 healthtech-platform/
 |-- apps/
-|   `-- patient-mobile/    Expo patient application
+|   `-- patient-mobile/    Expo application for all three roles
 |-- backend/               FastAPI API, database, AI, documents, seed, tests
 |-- cv_service/            YOLO Pose adapter, simulator, CV tests
 |-- frontend/              Next.js Doctor and Hospital Admin application
@@ -213,7 +215,7 @@ npm run dev
 
 Open `http://localhost:3000`, `/doctor`, or `/admin`.
 
-### 3. Patient mobile
+### 3. Mobile app
 
 ```powershell
 cd apps\patient-mobile
@@ -251,7 +253,7 @@ The web panel is available at `http://localhost:3000` and the API at `http://loc
 | Backend | `DATABASE_URL`, `DEMO_MODE`, `CORS_ORIGINS` |
 | Backend AI | `AI_PROVIDER`, optional `AI_API_KEY`, `AI_MODEL`, `AI_BASE_URL` |
 | Backend CV | `CV_SERVICE_TOKEN`, `CV_HOSPITAL_ID` |
-| Patient mobile | `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO_MODE` |
+| Mobile (all roles) | `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO_MODE` |
 | Doctor/Admin web | `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE` |
 | CV laptop | `CV_BACKEND_URL`, `CV_SERVICE_TOKEN`, `CV_MODEL`, `CV_VIDEO_PATH` |
 
@@ -259,13 +261,15 @@ Use the committed `.env.example` files. Never commit real `.env` files or expose
 
 ## Demo accounts
 
-| Role | Synthetic identity |
-|---|---|
-| Patient | `patient@demo.az` |
-| Doctor | `doctor@demo.az` |
-| Hospital admin | `admin@demo.az` |
+| Role (AZ) | Role | Demo FIN | Synthetic identity |
+|---|---|---|---|
+| Vətəndaş | Patient | `1AZ0001` | `patient@demo.az` |
+| Həkim | Doctor | `2AZ0002` | `doctor@demo.az` |
+| Xəstəxana | Hospital admin | `3AZ0003` | `admin@demo.az` |
 
-Demo authentication uses the `X-Demo-User` header. It is enabled only when `DEMO_MODE=true`.
+Sign in through the portal screen at `/login` on the web panels or the FIN screen in the mobile app. `POST /auth/login` maps a synthetic FIN and the selected role to the demo identity; the selected role must match the FIN or the request is rejected with 401.
+
+Demo authentication still uses the `X-Demo-User` header, which now carries the email returned by login. Both the endpoint and the header are enabled only when `DEMO_MODE=true`.
 
 ## Demo reset and pre-flight
 

@@ -6,13 +6,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AppButton } from "@/components/AppButton";
 import { colors, radius, spacing } from "@/constants/theme";
 import { API_URL, DEMO_MODE, login } from "@/services/api";
-import { getSession, setSession } from "@/services/session";
+import { ROLE_HOME, getSession, setSession } from "@/services/session";
 import type { DemoRole } from "@/types/api";
 
 const roles: { value: DemoRole; label: string; hint: string }[] = [
   { value: "PATIENT", label: "Vətəndaş", hint: "Şəxsi sağlamlıq tarixçəsi" },
-  { value: "DOCTOR", label: "Həkim", hint: "Web paneldə açılır" },
-  { value: "HOSPITAL_ADMIN", label: "Xəstəxana", hint: "Web paneldə açılır" },
+  { value: "DOCTOR", label: "Həkim", hint: "Xəstə qəbulu və konsultasiya" },
+  { value: "HOSPITAL_ADMIN", label: "Xəstəxana", hint: "Çarpayı, tapşırıq və təhlükəsizlik" },
 ];
 
 export default function Login() {
@@ -20,22 +20,17 @@ export default function Login() {
   const [role, setRole] = useState<DemoRole>("PATIENT");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
-  useEffect(() => { void getSession().then(value => { if (value) router.replace("/(tabs)"); }); }, []);
+  useEffect(() => { void getSession().then(value => { if (value) router.replace(ROLE_HOME[value.role]); }); }, []);
 
-  function choose(value: DemoRole) {
-    setRole(value); setError("");
-    setNotice(value === "PATIENT" ? "" : "Bu rol web panelindədir. Mobil tətbiq vətəndaş üçündür.");
-  }
+  function choose(value: DemoRole) { setRole(value); setError(""); }
 
   async function submit() {
     setLoading(true); setError("");
     try {
       const user = await login(fin.trim().toUpperCase(), role);
-      if (user.role !== "PATIENT") { setError("Bu rol web panelindədir. Mobil tətbiqə yalnız vətəndaş daxil ola bilər."); return; }
       await setSession(user);
-      router.replace("/(tabs)");
+      router.replace(ROLE_HOME[user.role]);
     } catch (value) {
       setError(value instanceof Error ? value.message : "Giriş mümkün olmadı.");
     } finally { setLoading(false); }
@@ -83,7 +78,6 @@ export default function Login() {
             </Pressable>)}
         </View>
 
-        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <AppButton label="Daxil ol" loading={loading} disabled={!DEMO_MODE || !API_URL || fin.trim().length !== 7} onPress={submit}/>
@@ -92,8 +86,8 @@ export default function Login() {
         <View style={styles.finBox}>
           <Text style={styles.finTitle}>DEMO FIN KODLARI</Text>
           <Text style={styles.finItem}>1AZ0001 · Vətəndaş</Text>
-          <Text style={styles.finItem}>2AZ0002 · Həkim (web)</Text>
-          <Text style={styles.finItem}>3AZ0003 · Xəstəxana (web)</Text>
+          <Text style={styles.finItem}>2AZ0002 · Həkim</Text>
+          <Text style={styles.finItem}>3AZ0003 · Xəstəxana</Text>
         </View>
       </View>
 
@@ -122,7 +116,6 @@ const styles = StyleSheet.create({
   roleText: { flex: 1 },
   roleLabel: { color: colors.text, fontSize: 14, fontWeight: "800" },
   roleHint: { color: colors.secondary, fontSize: 12 },
-  notice: { color: colors.primaryDark, lineHeight: 20 },
   error: { color: colors.danger, lineHeight: 20 },
   finBox: { backgroundColor: colors.muted, borderRadius: radius.sm, padding: spacing.lg, gap: 3 },
   finTitle: { color: colors.secondary, fontSize: 11, fontWeight: "900", letterSpacing: 1, marginBottom: spacing.xs },
