@@ -58,7 +58,7 @@ The only gap was the **timeline**: the README promises "patient brief + timeline
 | Bed and patient-flow status | ✅ | ✅ | `admin/beds`, `admin/flow` | `GET .../beds`, `GET .../flow` |
 | Discharge blockers + prioritized tasks | ✅ | ✅ | `admin/tasks` (`Tasks`) | `GET /tasks`, `PATCH /tasks/{id}`, `POST /tasks/{id}/complete` |
 | Capacity forecast **+ recommendations** | ⚠️ | ✅ | **new** `Analytics` component | `GET .../forecast`, `GET .../recommendations` |
-| Room 204 safety alert | ✅ | ✅ | `admin/safety` (`Safety`) | `GET /safety/events`, `POST /cv-events` |
+| Room 204 safety alert | ✅ | ✅ | `admin/safety` (`Safety`) | `GET /safety/events`, `POST /cv-events`, `POST /cv/analyze` |
 | Nurse task / ack / resolve / **audit** | ⚠️ | ✅ | `Safety` now renders nurse tasks and the audit trail | `GET /audit`, `POST .../send-nurse`, `PATCH .../acknowledge`, `.../resolve` |
 
 The **200-bed claim is real**: `backend/app/demo_seed.py:215-223` seeds beds 1–200, and the new department test asserts the per-department totals sum to exactly 200.

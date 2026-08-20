@@ -16,7 +16,10 @@ export function IntelligenceHome(){
  if(error)return <p className="mt-6 text-red-700">{error}</p>;
  if(!data)return <p className="mt-6 text-gray-500">Loading intelligence…</p>;
  const tiles=[["Critical medication alerts",data.critical_medication_alerts,"/admin/medication-safety"],["Hospital ER load",`${data.hospital_capacity_percent}%`,"/admin/routing"],["Emergency routing",data.emergency_routing_cases,"/admin/routing"],["Blood resource alerts",data.blood_resource_alerts,"/admin/resources"],["Epidemiology signals",data.epidemiology_signals,"/admin/epidemics"],["Break-glass today",data.break_glass_today,"/admin/break-glass"]];
- return <div className="mt-6 grid gap-4 md:grid-cols-3">{tiles.map(([label,value,href])=><a key={label} href={href} className="rounded-2xl border border-border bg-white p-5 shadow-sm"><p className="text-xs font-bold tracking-wider text-gray-500">{label.toUpperCase()}</p><p className="mt-2 text-4xl font-bold">{value}</p></a>)}<p className="md:col-span-3 text-sm text-gray-500">{data.disclaimer}</p></div>;
+ const dataset=data.open_datasets?.[0];
+ return <div className="mt-6 grid gap-4 md:grid-cols-3">{tiles.map(([label,value,href])=><a key={label} href={href} className="rounded-2xl border border-border bg-white p-5 shadow-sm"><p className="text-xs font-bold tracking-wider text-gray-500">{label.toUpperCase()}</p><p className="mt-2 text-4xl font-bold">{value}</p></a>)}
+ {dataset?<article className="md:col-span-3 rounded-2xl border border-border bg-white p-5 shadow-sm"><p className="text-xs font-bold tracking-wider text-gray-500">OPEN DATASET</p><h2 className="mt-2 text-xl font-bold">{dataset.name}</h2><p className="mt-2 text-sm text-gray-600">{Number(data.population_cbc_rows||dataset.rows).toLocaleString()} complete CBC rows · {dataset.license}</p><p className="mt-2 text-sm text-gray-500">{dataset.role}</p></article>:null}
+ <p className="md:col-span-3 text-sm text-gray-500">{data.disclaimer}</p></div>;
 }
 
 export function MedicationSafety({role}:{role:string}){

@@ -11,6 +11,7 @@ htmlcov/
 backend/*.db
 backend/tests/*.db
 backend/uploads/
+backend/data/*.xpt
 
 # JavaScript and Expo build output
 node_modules/

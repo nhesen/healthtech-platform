@@ -145,6 +145,8 @@ The safety contract is explicit:
 
 The CV service observes explainable pose states such as `LYING`, `SITTING`, and `STANDING`. Stable-frame confirmation and cooldown prevent alert spam. A qualifying transition creates a real `/cv-events` backend event, updates Room 204, notifies hospital operations, and supports nurse dispatch, acknowledgement, and resolution.
 
+Hospital Admin Safety can also upload a corridor photo or video. The API writes the file to a temporary folder, runs YOLO Pose in the isolated `cv_service` process, returns occupancy and movement, then deletes the file. Overcrowding notifies operations; it does not flip Room 204 to fall risk. If Ultralytics is missing, `/cv/vision-status` reports `yolo_active: false` and `/cv/analyze` returns 503 instead of inventing people.
+
 The service performs no face recognition, identity recognition, diagnosis, or autonomous clinical action.
 
 ## Demo
@@ -159,6 +161,8 @@ The deterministic demo tells one connected story:
 6. Hospital Admin resolves Patient #104's discharge blocker and releases a bed.
 7. The local CV simulator sends a fall-risk event; Room 204 updates in the Admin panel.
 8. Demo Reset restores the exact initial state.
+
+The case timeline is Hasan's two CBC reports. Rankings use the open NHANES 2021–2023 CBC cohort (`7,593` complete panels, U.S. public domain). Details: [`backend/data/SOURCES.md`](backend/data/SOURCES.md).
 
 Follow the judge-ready [Demo Script](docs/DEMO.md). Product screenshot targets are documented in [`docs/screenshots`](docs/screenshots/README.md).
 
@@ -258,7 +262,7 @@ The web panel is available at `http://localhost:3000` and the API at `http://loc
 | Backend CV | `CV_SERVICE_TOKEN`, `CV_HOSPITAL_ID` |
 | Mobile (all roles) | `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_DEMO_MODE` |
 | Doctor/Admin web | `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE` |
-| CV laptop | `CV_BACKEND_URL`, `CV_SERVICE_TOKEN`, `CV_MODEL`, `CV_VIDEO_PATH` |
+| CV laptop | `CV_BACKEND_URL`, `CV_SERVICE_TOKEN`, `CV_MODEL`, `CV_VIDEO_PATH`, optional `CV_DEVICE` |
 
 Use the committed `.env.example` files. Never commit real `.env` files or expose database, AI, service-role, or CV secrets through public frontend variables.
 

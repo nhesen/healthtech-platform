@@ -14,14 +14,14 @@ function authHeaders(extra?:Record<string,string>):Record<string,string>{return{
 
 async function fetchApi(path:string,init:RequestInit={}){
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),path.startsWith("/documents")?60000:20000);
+  const timer=setTimeout(()=>controller.abort(),path.startsWith("/documents")||path.startsWith("/cv/analyze")?120000:20000);
   try{return await fetch(`${API_BASE}${path}`,{...init,signal:controller.signal})}
   catch{throw new ApiError(0,"Unable to connect to the HealthTech service.")}
   finally{clearTimeout(timer)}
 }
 async function checked<T>(res:Response):Promise<T>{
   if(res.ok)return res.json();
-  const messages:Record<number,string>={401:"Your demo session is invalid or expired.",403:"You do not have permission to view this information.",404:"The requested information was not found.",409:"This action conflicts with the current state. Refresh and try again.",422:"Please check the entered information."};
+  const messages:Record<number,string>={401:"Your demo session is invalid or expired.",403:"You do not have permission to view this information.",404:"The requested information was not found.",409:"This action conflicts with the current state. Refresh and try again.",422:"Please check the entered information.",503:"YOLO Pose is not active. Install cv_service/requirements-vision.txt and retry."};
   throw new ApiError(res.status,messages[res.status]??"Something went wrong. Core medical data remains available.");
 }
 export async function api<T>(path: string): Promise<T> {

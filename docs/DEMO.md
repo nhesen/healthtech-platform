@@ -28,6 +28,7 @@ $env:DEMO_BACKEND_URL="http://localhost:8000"
 - Doctor: Dr. Leyla Mammadova, Endocrinology, `60 AZN`
 - Insurance: `80%` covered, `48 AZN` insurer payment, `12 AZN` patient payment
 - Labs: two complete blood counts, `02.09.2025` vs `10.08.2026` — WBC `10.64 → 7.38`, PLT `341 → 234`, MCV `75.3 → 76.2`, Hemoglobin `14.3 → 13.9`
+- Population reference: NHANES 2021–2023 CBC, `7,593` complete panels, public domain
 - Booking: no active Hasan appointment, at least one available Dr. Leyla slot
 - Queue after booking: position `4`, three patients ahead, approximately `45 minutes`
 - Hospital: `195 / 200` occupied, five available
@@ -124,8 +125,9 @@ In Admin Safety:
 2. Send a nurse.
 3. Acknowledge the event.
 4. Resolve it and show Room 204 return to `STABLE`.
+5. If YOLO Pose is installed, upload a corridor photo or short video and show the `YOLO ACTIVE` badge, occupancy level, and pose transitions. If it is not installed, show `YOLO INACTIVE` and the honest 503 rather than a fake crowd count.
 
-Key message: the CV process sends only a safety event, not identity or video data.
+Key message: the CV process sends only a safety event, not identity or video data. Occupancy uploads are discarded after inference.
 
 ### 6:30-7:00 — Reliability close
 

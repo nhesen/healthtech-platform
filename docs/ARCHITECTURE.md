@@ -172,7 +172,9 @@ AI may summarize and suggest review points. It may not:
 
 ## Computer-vision boundary
 
-The CV process is separate from the API. It converts video frames into pose states, waits for stable states, applies transition and cooldown rules, and sends a small event payload. Video frames and identity data are not sent to the backend.
+The CV process is separate from the API. It converts video frames into pose states, waits for stable states, applies transition and cooldown rules, and sends a small event payload. Live camera frames are not stored by the API.
+
+Hospital Admin Safety may upload a temporary corridor photo or video. FastAPI keeps the file only for the YOLO Pose subprocess, returns occupancy and movement JSON, then deletes it. Overcrowding is a warning event; it does not reuse the fall-risk room flag.
 
 Recommended hackathon mode:
 

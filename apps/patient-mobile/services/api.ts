@@ -29,7 +29,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   headers.set("X-Demo-User", email);
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   const controller = new AbortController();
-  const timeoutMs = path.startsWith("/documents") ? Math.max(API_TIMEOUT_MS, 60000) : API_TIMEOUT_MS;
+  const timeoutMs = path.startsWith("/documents") || path.startsWith("/cv/analyze") ? Math.max(API_TIMEOUT_MS, 120000) : API_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${API_URL}${path}`, { ...init, headers, signal: controller.signal });
@@ -78,6 +78,25 @@ export async function uploadDocument(asset: UploadAsset): Promise<DocumentUpload
   const form = new FormData();
   form.append("file", { uri: asset.uri, name: asset.name, type: asset.mimeType } as unknown as Blob);
   return api<DocumentUpload>(`/documents/upload?patient_id=${PATIENT_ID}`, { method: "POST", body: form });
+}
+
+export interface VisionStatus {
+  yolo_active: boolean; engine: string | null; model: string | null; device?: string | null;
+  identity_recognition: boolean; frames_sent_to_api: boolean; install_hint: string | null;
+}
+export interface VisionAnalysis {
+  yolo_active: boolean; engine?: string; identity_recognition: boolean; frames_discarded?: boolean;
+  frames_analyzed?: number; peak_people?: number; average_people?: number; room_id?: string;
+  crowding?: { level: string; peak_people: number; average_people: number; explanation: string };
+  movement?: { pose_counts: Record<string, number>; transitions: string[]; incoming_people: boolean; fall_risk_signal: boolean; explanation: string };
+  latest_people?: { index: number; state: string; confidence: number }[];
+  events_posted?: { id: string; status: string }[];
+}
+export async function uploadVision(asset: UploadAsset, roomId = "204"): Promise<VisionAnalysis> {
+  const form = new FormData();
+  form.append("file", { uri: asset.uri, name: asset.name, type: asset.mimeType } as unknown as Blob);
+  form.append("room_id", roomId);
+  return api<VisionAnalysis>("/cv/analyze", { method: "POST", body: form });
 }
 
 export async function reviewAndConfirm(documentId: string, results: ExtractedLab[], reportDate?: string, sourceName?: string) {

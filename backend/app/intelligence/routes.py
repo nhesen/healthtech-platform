@@ -118,6 +118,7 @@ def register(app) -> None:
             blood_open = conn.execute("SELECT COUNT(*) AS c FROM resource_requests WHERE status='OPEN'").fetchone()["c"]
             signals = epidemic_from_reports(conn)
             routing_busy = sum(1 for x in snap if x["er_load_percent"] >= 75)
+            from ..population import catalog
             return {
                 "title": "HealthTech Intelligence",
                 "critical_medication_alerts": critical,
@@ -127,6 +128,8 @@ def register(app) -> None:
                 "blood_resource_alerts": blood_open,
                 "epidemiology_signals": len(signals),
                 "break_glass_today": glass_today,
+                "open_datasets": [catalog()],
+                "population_cbc_rows": conn.execute("SELECT COUNT(*) FROM population_cbc").fetchone()[0],
                 "disclaimer": "Decision support for professional review. Not an autonomous clinical system.",
             }
 

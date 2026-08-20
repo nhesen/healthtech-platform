@@ -122,4 +122,12 @@ CREATE INDEX IF NOT EXISTS idx_prescriptions_patient ON prescriptions(patient_id
 CREATE INDEX IF NOT EXISTS idx_med_alerts_patient ON medication_alerts(patient_id,status);
 CREATE INDEX IF NOT EXISTS idx_break_glass_actor ON emergency_access(actor_id,patient_id,expires_at);
 CREATE INDEX IF NOT EXISTS idx_symptoms_region_date ON symptom_reports(region,report_date);
+CREATE TABLE IF NOT EXISTS population_cbc (
+  seqn INTEGER PRIMARY KEY,
+  source TEXT NOT NULL,
+  sex TEXT,
+  age_years INTEGER,
+  wbc REAL, rbc REAL, hemoglobin REAL, hct REAL, mcv REAL, mch REAL, mchc REAL, rdw REAL, plt REAL
+);
+CREATE INDEX IF NOT EXISTS idx_population_cbc_sex_age ON population_cbc(sex, age_years);
 """

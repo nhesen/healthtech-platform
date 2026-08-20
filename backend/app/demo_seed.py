@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-DEMO_VERSION = 13
+DEMO_VERSION = 14
 HOSPITAL_ID = "hospital_caspian"
 MASTER_PATIENT_ID = "patient_hasan"
 MASTER_DOCTOR_ID = "doctor_leyla"
@@ -275,6 +275,8 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
     conn.execute("INSERT INTO demo_seed_versions(key,version,updated_at) VALUES('master',?,?) ON CONFLICT(key) DO UPDATE SET version=excluded.version,updated_at=excluded.updated_at", (DEMO_VERSION, created))
     from .intelligence.seed import reset_intelligence
     reset_intelligence(conn)
+    from .population import ensure_population
+    ensure_population(conn)
     return upload_paths
 
 
@@ -294,6 +296,7 @@ def demo_readiness(conn: sqlite3.Connection, demo_pdf: Path) -> dict[str, Any]:
         "room_204_stable": conn.execute("SELECT COUNT(*) AS count FROM rooms WHERE id='room_204' AND safety_status='STABLE'").fetchone()["count"] == 1,
         "no_active_cv_events": conn.execute("SELECT COUNT(*) AS count FROM cv_events e JOIN safety_event_details d ON d.event_id=e.id WHERE e.room_id='204' AND d.status!='RESOLVED'").fetchone()["count"] == 0,
         "demo_pdf": demo_pdf.exists(),
+        "nhanes_cbc": conn.execute("SELECT COUNT(*) AS count FROM population_cbc").fetchone()["count"] >= 7000,
         "ai_fallback": True,
         "cv_simulator_contract": True,
     }

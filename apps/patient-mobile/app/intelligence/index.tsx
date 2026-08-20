@@ -34,7 +34,7 @@ function Intelligence() {
       <Tile label="Medication alerts" value={overview.critical_medication_alerts}/>
       <Tile label="ER load" value={`${overview.hospital_capacity_percent}%`}/>
       <Tile label="Blood alerts" value={overview.blood_resource_alerts}/>
-      <Tile label="Signals" value={overview.epidemiology_signals}/>
+      <Tile label="Open CBC rows" value={Number(overview.population_cbc_rows || 0).toLocaleString()}/>
     </View>
     <Card title={`Route to ${routing.recommended?.name}`}>
       <Pill label={routing.priority} tone="red"/>

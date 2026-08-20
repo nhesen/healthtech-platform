@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status, UploadFile, File
+from fastapi import Depends, FastAPI, Header, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -22,6 +22,7 @@ from .ai import ai_service
 from .database import DATABASE_KIND, DB_PATH, connect
 from .demo_seed import DEMO_VERSION, demo_readiness, reset_demo_data
 from .documents import ALLOWED, classify, extract_text, file_hash, parse_lab
+from .vision import MAX_VISION_BYTES, run_pose_analysis, sniff_media, vision_status
 
 ROOT = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR") or ROOT / "uploads"); UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -163,6 +164,8 @@ def seed() -> None:
         migrate(conn)
         version=conn.execute("SELECT version FROM demo_seed_versions WHERE key='master'").fetchone()
         if demo_enabled() and (not version or version["version"]<DEMO_VERSION): paths=reset_demo_data(conn)
+        from .population import ensure_population
+        ensure_population(conn)
     _remove_demo_uploads(paths)
 
 
@@ -297,7 +300,7 @@ class AppointmentStatusIn(BaseModel): status:Literal["SCHEDULED","CHECKED_IN","W
 class ConsentIn(BaseModel): doctor_id:str; categories:list[ClinicalCategory]=Field(min_length=1,max_length=7); hours:int=Field(24,ge=1,le=168)
 class ConsultationIn(BaseModel): appointment_id:str; transcript:str=""; doctor_notes:str=""; final_note:str|None=None; complete:bool=False
 class CheckinIn(BaseModel): pain_score:int=Field(ge=1,le=10); temperature:float=Field(ge=30,le=45); medication_taken:bool; symptoms:str=Field("",max_length=1000); notes:str=Field("",max_length=2000)
-class CVEventIn(BaseModel): hospital_id:str="hospital_caspian"; room_id:str=Field(min_length=1,max_length=30); event_type:Literal["FALL_RISK","PATIENT_STANDING","OUT_OF_BED"]="FALL_RISK"; severity:Literal["HIGH","CRITICAL","WARNING","MEDIUM"]="HIGH"; confidence:float=Field(ge=0,le=1); patient_state:Literal["LYING","SITTING","STANDING","UNKNOWN","OUT_OF_BED"]="STANDING"; previous_state:Literal["LYING","SITTING","STANDING","UNKNOWN","OUT_OF_BED"]="SITTING"; timestamp:datetime|None=None; metadata:dict[str,Any]=Field(default_factory=dict)
+class CVEventIn(BaseModel): hospital_id:str="hospital_caspian"; room_id:str=Field(min_length=1,max_length=30); event_type:Literal["FALL_RISK","PATIENT_STANDING","OUT_OF_BED","OVERCROWDING"]="FALL_RISK"; severity:Literal["HIGH","CRITICAL","WARNING","MEDIUM"]="HIGH"; confidence:float=Field(ge=0,le=1); patient_state:Literal["LYING","SITTING","STANDING","UNKNOWN","OUT_OF_BED"]="STANDING"; previous_state:Literal["LYING","SITTING","STANDING","UNKNOWN","OUT_OF_BED"]="SITTING"; timestamp:datetime|None=None; metadata:dict[str,Any]=Field(default_factory=dict)
 class ReadIn(BaseModel): ids:list[str]=[]
 class AITextIn(BaseModel): patient_id:str|None=None; notes:str=""; missing:list[str]=[]; task_id:str|None=None
 class LabResultIn(BaseModel): test_name:str=Field(min_length=1,max_length=100); value:float=Field(ge=-1_000_000,le=1_000_000); unit:str=Field("",max_length=40); reference_text:str=Field("",max_length=100)
@@ -318,7 +321,7 @@ def health_demo(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     if not demo_enabled(): raise HTTPException(404,"Not found")
     with db() as conn:
         result=demo_readiness(conn,ROOT/"demo_documents"/"hasan_lab_report.pdf")
-        result.update({"database":"ok","storage":"writable" if os.access(UPLOAD_DIR,os.W_OK) else "unavailable","ai_provider":"live" if os.getenv("AI_PROVIDER","mock").lower()=="openai" and bool(os.getenv("AI_API_KEY")) else "deterministic_fallback","cv_ingestion":"service-token-ready" if os.getenv("CV_SERVICE_TOKEN") else "demo-simulator-ready"})
+        result.update({"database":"ok","storage":"writable" if os.access(UPLOAD_DIR,os.W_OK) else "unavailable","ai_provider":"live" if os.getenv("AI_PROVIDER","mock").lower()=="openai" and bool(os.getenv("AI_API_KEY")) else "deterministic_fallback","cv_ingestion":"service-token-ready" if os.getenv("CV_SERVICE_TOKEN") else "demo-simulator-ready","yolo_pose":vision_status()})
         return result
 @app.get("/auth/me")
 def me(user:DemoUser=Depends(current_user)): return user
@@ -447,12 +450,22 @@ def lab_comparison(patient_id:str,from_date:date,to_date:date,user:DemoUser=Depe
     with db() as conn:
         clinical_access(conn,patient_id,user,("LAB_RESULTS",))
         if from_date>to_date: raise HTTPException(422,"from_date must not be after to_date")
+        p=one(conn,"SELECT gender,dob FROM patients WHERE id=?",(patient_id,))
         from_value,to_value=from_date.isoformat(),to_date.isoformat(); all_labs=rows(conn.execute("SELECT metric,value,unit,result_date,reference_range FROM lab_results WHERE patient_id=? ORDER BY result_date",(patient_id,)).fetchall()); result=[]
         for metric in sorted({x["metric"] for x in all_labs}):
             series=[x for x in all_labs if x["metric"]==metric]; old=max((x for x in series if x["result_date"]<=from_value),key=lambda x:x["result_date"],default=None); new=max((x for x in series if x["result_date"]<=to_value),key=lambda x:x["result_date"],default=None)
             if old and new: result.append({"metric":metric,"from":old,"to":new,"change":round(new["value"]-old["value"],2),"direction":"up" if new["value"]>old["value"] else "down" if new["value"]<old["value"] else "same"})
+        from .population import attach_population, catalog
+        result=attach_population(conn,result,(p or {}).get("gender"),(p or {}).get("dob"))
         changed=[x["metric"] for x in result if x["change"]]
-        return {"from_date":from_value,"to_date":to_value,"metrics":result,"explanation":f"{len(changed)} metrics changed between these tests. This comparison does not provide a diagnosis."}
+        return {"from_date":from_value,"to_date":to_value,"metrics":result,"population":catalog(),"explanation":f"{len(changed)} metrics changed between these tests. Latest values are also ranked against the open NHANES 2021-2023 CBC cohort. This comparison does not provide a diagnosis."}
+@app.get("/labs/population")
+def labs_population(user:DemoUser=Depends(current_user)):
+    from .population import catalog, ensure_population
+    with db() as conn:
+        n=ensure_population(conn)
+        body=catalog(); body["loaded_rows"]=n
+        return body
 @app.get("/insurance/plan")
 def insurance_plan(patient_id:str,user:DemoUser=Depends(require("PATIENT"))):
     """Coverage percentages the patient's plan applies per service, straight from insurance_coverage."""
@@ -713,7 +726,35 @@ def cv_event(payload:CVEventIn,user:DemoUser=Depends(cv_principal)):
         if event_time>datetime.now(timezone.utc)+timedelta(minutes=5): raise HTTPException(422,"CV event timestamp cannot be in the future")
         occurred=event_time.isoformat(); recent=one(conn,"SELECT id FROM cv_events WHERE hospital_id=? AND room_id=? AND event_type=? AND occurred_at>? ORDER BY occurred_at DESC",(payload.hospital_id,payload.room_id,payload.event_type,(datetime.now(timezone.utc)-timedelta(seconds=30)).isoformat()))
         if recent: return {"id":recent["id"],"status":"deduplicated","notification_created":False}
-        eid=uid("cv"); conn.execute("INSERT INTO cv_events VALUES(?,?,?,?,?,?,?)",(eid,payload.hospital_id,payload.room_id,payload.event_type,payload.severity,payload.confidence,occurred)); conn.execute("INSERT INTO safety_event_details VALUES(?,?,?,?,?,?,?,?)",(eid,payload.patient_state,payload.previous_state,"ACTIVE",None,None,None,json.dumps(payload.metadata))); conn.execute("UPDATE rooms SET safety_status='HIGH_FALL_RISK' WHERE id=? AND hospital_id=?",(f"room_{payload.room_id}",payload.hospital_id)); notify(conn,role="HOSPITAL_ADMIN",hospital_id=payload.hospital_id,kind="CRITICAL",message=f"High fall risk — Room {payload.room_id}: patient attempting to stand without assistance.",related_type="cv_event",related_id=eid); audit(conn,user.id,"CV_EVENT_CREATED","cv_event",eid,{"hospital_id":payload.hospital_id,"room_id":payload.room_id,"state":payload.patient_state}); return {"id":eid,"status":"ACTIVE","notification_created":True}
+        eid=uid("cv"); conn.execute("INSERT INTO cv_events VALUES(?,?,?,?,?,?,?)",(eid,payload.hospital_id,payload.room_id,payload.event_type,payload.severity,payload.confidence,occurred)); conn.execute("INSERT INTO safety_event_details VALUES(?,?,?,?,?,?,?,?)",(eid,payload.patient_state,payload.previous_state,"ACTIVE",None,None,None,json.dumps(payload.metadata)))
+        if payload.event_type in {"FALL_RISK","PATIENT_STANDING","OUT_OF_BED"}:
+            conn.execute("UPDATE rooms SET safety_status='HIGH_FALL_RISK' WHERE id=? AND hospital_id=?",(f"room_{payload.room_id}",payload.hospital_id)); notify(conn,role="HOSPITAL_ADMIN",hospital_id=payload.hospital_id,kind="CRITICAL",message=f"High fall risk — Room {payload.room_id}: patient attempting to stand without assistance.",related_type="cv_event",related_id=eid)
+        elif payload.event_type=="OVERCROWDING":
+            notify(conn,role="HOSPITAL_ADMIN",hospital_id=payload.hospital_id,kind="WARNING",message=f"Corridor crowding — Room {payload.room_id}: YOLO Pose counted a dense scene. This is occupancy support, not a diagnosis.",related_type="cv_event",related_id=eid)
+        audit(conn,user.id,"CV_EVENT_CREATED","cv_event",eid,{"hospital_id":payload.hospital_id,"room_id":payload.room_id,"state":payload.patient_state,"event_type":payload.event_type}); return {"id":eid,"status":"ACTIVE","notification_created":True}
+@app.get("/cv/vision-status")
+def cv_vision_status(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    return vision_status()
+@app.post("/cv/analyze")
+async def cv_analyze(file:UploadFile=File(...),room_id:str=Form("204"),user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
+    enforce_rate(f"cv-analyze:{user.id}",8,60)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,30}",room_id): raise HTTPException(422,"Room id is invalid.")
+    data=await file.read(MAX_VISION_BYTES+1)
+    if not data: raise HTTPException(422,"The uploaded file is empty.")
+    if len(data)>MAX_VISION_BYTES: raise HTTPException(413,"Maximum file size is 25 MB.")
+    media_type,suffix=sniff_media(data,file.content_type or "",file.filename or "scene")
+    analysis=run_pose_analysis(data,suffix)
+    analysis["room_id"]=room_id
+    analysis["source_media"]=media_type
+    posted=[]
+    crowding=analysis.get("crowding") or {}
+    movement=analysis.get("movement") or {}
+    if crowding.get("level")=="OVERCROWDED":
+        posted.append(cv_event(CVEventIn(hospital_id="hospital_caspian",room_id=room_id,event_type="OVERCROWDING",severity="WARNING",confidence=min(1.0,0.55+0.04*int(crowding.get("peak_people") or 0)),patient_state="UNKNOWN",previous_state="UNKNOWN",metadata={"source":"hospital_upload","yolo_active":True,"peak_people":crowding.get("peak_people"),"identity_recognition":False}),user))
+    if movement.get("fall_risk_signal"):
+        posted.append(cv_event(CVEventIn(hospital_id="hospital_caspian",room_id=room_id,event_type="FALL_RISK",severity="HIGH",confidence=0.85,patient_state="STANDING",previous_state="SITTING",metadata={"source":"hospital_upload","yolo_active":True,"identity_recognition":False}),user))
+    analysis["events_posted"]=posted
+    return analysis
 @app.get("/notifications")
 def notifications(unread_only:bool=False,kind:str|None=None,user:DemoUser=Depends(current_user)):
     with db() as conn:
@@ -777,7 +818,8 @@ def send_nurse(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
         if event["event_status"] not in {"ACTIVE","ACKNOWLEDGED"}: raise HTTPException(409,"Resolved events cannot create nurse tasks")
         existing=one(conn,"SELECT id,status FROM safety_tasks WHERE event_id=? AND status!='COMPLETED'",(event_id,))
         if existing: return {"id":existing["id"],"status":existing["status"],"deduplicated":True}
-        task_id=uid("safety_task"); conn.execute("INSERT INTO safety_tasks VALUES(?,?,?,?,?,?,?,?,?)",(task_id,event_id,event["room_id"],f"Assist Patient — Room {event['room_id']}","NURSE","CRITICAL","PENDING",now(),None)); notify(conn,role="HOSPITAL_ADMIN",hospital_id=event["hospital_id"],kind="TASK",message=f"Nurse assistance task created for Room {event['room_id']}.",related_type="safety_task",related_id=task_id); audit(conn,user.id,"NURSE_TASK_CREATED","safety_task",task_id); return {"id":task_id,"status":"PENDING"}
+        title="Crowd control — Room "+event["room_id"] if event["event_type"]=="OVERCROWDING" else f"Assist Patient — Room {event['room_id']}"
+        task_id=uid("safety_task"); conn.execute("INSERT INTO safety_tasks VALUES(?,?,?,?,?,?,?,?,?)",(task_id,event_id,event["room_id"],title,"NURSE","CRITICAL","PENDING",now(),None)); notify(conn,role="HOSPITAL_ADMIN",hospital_id=event["hospital_id"],kind="TASK",message=f"Nurse assistance task created for Room {event['room_id']}.",related_type="safety_task",related_id=task_id); audit(conn,user.id,"NURSE_TASK_CREATED","safety_task",task_id); return {"id":task_id,"status":"PENDING"}
 @app.patch("/cv-events/{event_id}/resolve")
 def resolve_event(event_id:str,user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
     with db() as conn:
