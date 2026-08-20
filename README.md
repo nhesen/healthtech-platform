@@ -115,7 +115,7 @@ See [Architecture Documentation](docs/ARCHITECTURE.md) for component boundaries,
 
 | Layer | Technology |
 |---|---|
-| Patient mobile | Expo SDK 57, React Native 0.86, TypeScript, Expo Router |
+| Patient mobile | Expo SDK 54, React Native 0.81, TypeScript, Expo Router |
 | Doctor/Admin web | Next.js 15, React 19, TypeScript, Tailwind CSS |
 | API | FastAPI, Pydantic, Uvicorn, Python 3.11+ |
 | Database | SQLite locally; PostgreSQL/Supabase through `DATABASE_URL` |

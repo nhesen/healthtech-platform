@@ -1,6 +1,8 @@
 # HealthTech Patient Mobile
 
-Expo SDK 57, React Native, TypeScript, and Expo Router patient application. It consumes the existing FastAPI APIs and uses only Expo Go-compatible modules.
+Expo SDK 54, React Native, TypeScript, and Expo Router patient application. It consumes the existing FastAPI APIs and uses only Expo Go-compatible modules.
+
+SDK 54 is the newest Expo SDK available in the Apple App Store build of Expo Go, so reviewers can scan the QR code with the store version of Expo Go on a physical iPhone without sideloading or re-signing.
 
 ## Configure
 
