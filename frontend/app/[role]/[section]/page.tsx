@@ -73,7 +73,7 @@ function VisionMonitor({reload}:{reload:()=>void}){
     try{
       const form=new FormData(); form.append("file",file); form.append("room_id","204");
       const next=await uploadFile<any>("/cv/analyze",form); setResult(next);
-      setMessage(next.yolo_active?"YOLO Pose finished. Occupancy is decision support, not a diagnosis.":"YOLO Pose is not active.");
+      setMessage(next.yolo_active?"YOLO Pose finished. Green cells are empty; red cells are occupied.":"YOLO Pose is not active.");
       reload();
     }catch(error:any){setMessage(error.message||"Analysis failed.")}
     finally{setBusy(false)}
@@ -88,6 +88,7 @@ function VisionMonitor({reload}:{reload:()=>void}){
     <input aria-label="Upload corridor photo or video" className="mt-4 block w-full text-sm" type="file" accept="image/jpeg,image/png,video/mp4,video/quicktime,video/webm" disabled={busy} onChange={event=>{const file=event.target.files?.[0]; if(file) upload(file); event.target.value=""}}/>
     {busy?<p className="mt-3 text-sm font-medium text-primary">Analyzing…</p>:null}
     {message?<p className="mt-3 text-sm text-gray-700">{message}</p>:null}
+    {result?.overlay_image?.base64?<figure className="mt-4"><img alt="YOLO occupancy overlay. Green cells are empty, red cells are occupied." className="w-full rounded-xl border" src={`data:${result.overlay_image.mime};base64,${result.overlay_image.base64}`}/><figcaption className="mt-2 text-xs text-gray-500">Yaşıl = boş zona. Qırmızı = dolu zona. Pose qutuları şəxsiyyət deyil, sıxlıq markeridir.</figcaption></figure>:null}
     {result?<dl className="mt-4 grid gap-2 text-sm md:grid-cols-3"><div><dt className="text-gray-500">Density</dt><dd className="font-semibold">{result.crowding?.level} · peak {result.peak_people}</dd></div><div><dt className="text-gray-500">Movement</dt><dd className="font-semibold">{(result.movement?.transitions||[]).join(", ")||"No pose transition"}</dd></div><div><dt className="text-gray-500">Engine</dt><dd className="font-semibold">{result.engine||"inactive"}</dd></div></dl>:null}
     {result?.crowding?.explanation?<p className="mt-3 text-sm text-gray-600">{result.crowding.explanation}</p>:null}
     {result?.movement?.explanation?<p className="mt-1 text-sm text-gray-600">{result.movement.explanation}</p>:null}

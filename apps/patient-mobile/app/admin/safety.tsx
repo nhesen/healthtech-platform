@@ -1,7 +1,7 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "@/components/AppButton";
 import { Card } from "@/components/Card";
 import { PageHeader } from "@/components/PageHeader";
@@ -75,7 +75,9 @@ export default function Safety() {
         <AppButton label="Choose video file" variant="secondary" disabled={Boolean(busy)} onPress={pickVideo}/>
       </View>
       {analysis ? <>
+        {analysis.overlay_image?.base64 ? <Image accessibilityLabel="YOLO occupancy overlay" source={{ uri: `data:${analysis.overlay_image.mime};base64,${analysis.overlay_image.base64}` }} style={styles.overlay} resizeMode="contain"/> : null}
         <Text style={styles.historyLine}>{analysis.crowding?.level ?? "UNKNOWN"} · peak {analysis.peak_people ?? 0} people</Text>
+        <Text style={styles.footnote}>Yaşıl = boş zona. Qırmızı = dolu zona.</Text>
         <Text style={styles.footnote}>{analysis.crowding?.explanation}</Text>
         <Text style={styles.footnote}>{analysis.movement?.explanation}</Text>
         <Text style={styles.footnote}>{(analysis.movement?.transitions || []).join(", ") || "No pose transition"} · {analysis.engine || "inactive"}</Text>
@@ -116,5 +118,6 @@ const styles = StyleSheet.create({
   task: { paddingVertical: spacing.xs }, taskTitle: { color: colors.text, fontWeight: "700" },
   section: { color: colors.text, fontSize: 19, fontWeight: "900", marginTop: spacing.sm },
   historyLine: { color: colors.text, fontWeight: "700", marginTop: spacing.sm },
+  overlay: { width: "100%", height: 240, marginTop: spacing.md, borderRadius: 12, backgroundColor: colors.muted },
   error: { color: colors.danger, lineHeight: 20 },
 });

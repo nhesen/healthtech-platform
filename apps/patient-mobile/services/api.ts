@@ -90,6 +90,7 @@ export interface VisionAnalysis {
   crowding?: { level: string; peak_people: number; average_people: number; explanation: string };
   movement?: { pose_counts: Record<string, number>; transitions: string[]; incoming_people: boolean; fall_risk_signal: boolean; explanation: string };
   latest_people?: { index: number; state: string; confidence: number }[];
+  overlay_image?: { mime: string; base64: string } | null;
   events_posted?: { id: string; status: string }[];
 }
 export async function uploadVision(asset: UploadAsset, roomId = "204"): Promise<VisionAnalysis> {

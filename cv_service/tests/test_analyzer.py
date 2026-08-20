@@ -1,4 +1,4 @@
-from app.analyzer import crowding_level, majority_pose, summarize_frames
+from app.analyzer import cell_color, crowding_level, majority_pose, occupancy_grid, render_occupancy_overlay, summarize_frames
 from app.detector import classify_keypoints
 
 
@@ -31,6 +31,21 @@ def test_summarize_frames_counts_people_and_pose_transitions():
     assert summary["movement"]["fall_risk_signal"] is True
     assert "SITTING->STANDING" in summary["movement"]["transitions"]
     assert majority_pose([sitting, standing, standing]) == "STANDING"
+
+
+def test_occupancy_grid_marks_people_cells():
+    grid = occupancy_grid(800, 600, [{"center": [50, 50]}, {"center": [790, 590]}])
+    assert grid[0][0] == 1
+    assert grid[5][7] == 1
+    assert sum(value for row in grid for value in row) == 2
+    assert cell_color(0)[1] > cell_color(2)[1]
+
+
+def test_occupancy_overlay_encodes_jpeg():
+    numpy = __import__("numpy")
+    image = numpy.zeros((120, 160, 3), dtype=numpy.uint8)
+    overlay = render_occupancy_overlay(image, [{"center": [20, 20], "state": "STANDING", "box": [5, 5, 40, 70]}])
+    assert overlay and overlay["mime"] == "image/jpeg" and overlay["base64"]
 
 
 def test_explainable_pose_geometry_states():

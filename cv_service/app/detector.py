@@ -37,13 +37,34 @@ def people_from_result(result: Any) -> list[dict[str, Any]]:
     if not xy:
         return []
     raw_conf = result.keypoints.conf.cpu().tolist() if result.keypoints.conf is not None else None
+    boxes = []
+    if result.boxes is not None and getattr(result.boxes, "xyxy", None) is not None:
+        boxes = result.boxes.xyxy.cpu().tolist()
     people = []
     for index, person in enumerate(xy):
         confs = raw_conf[index] if raw_conf and index < len(raw_conf) else [1.0] * len(person)
         points = [[pair[0], pair[1], confs[j] if j < len(confs) else 0.0] for j, pair in enumerate(person)]
         state, confidence = classify_keypoints(points)
-        people.append({"index": index, "state": state, "confidence": round(float(confidence), 3)})
+        box = boxes[index] if index < len(boxes) else None
+        center = _person_center(points, box)
+        item = {"index": index, "state": state, "confidence": round(float(confidence), 3)}
+        if box:
+            item["box"] = [round(float(value), 1) for value in box]
+        if center:
+            item["center"] = [round(float(center[0]), 1), round(float(center[1]), 1)]
+        people.append(item)
     return people
+
+
+def _person_center(points: list[list[float]], box: list[float] | None) -> list[float] | None:
+    if len(points) >= 13 and points[11][2] >= 0.35 and points[12][2] >= 0.35:
+        return [(points[11][0] + points[12][0]) / 2, (points[11][1] + points[12][1]) / 2]
+    if box and len(box) >= 4:
+        return [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2]
+    visible = [point for point in points if len(point) >= 3 and point[2] >= 0.35]
+    if visible:
+        return [sum(point[0] for point in visible) / len(visible), sum(point[1] for point in visible) / len(visible)]
+    return None
 
 
 class PoseDetector:
@@ -66,13 +87,18 @@ class PoseDetector:
             lead = max(people, key=lambda item: item["confidence"])
             yield lead["state"], lead["confidence"]
 
-    def analyze(self, source: str, frame_skip: int = 2, max_frames: int = 40) -> list[dict]:
+    def analyze(self, source: str, frame_skip: int = 2, max_frames: int = 40) -> tuple[list[dict], tuple[Any, list[dict]] | None]:
         frames = []
+        preview = None
+        best = -1
         for index, result in enumerate(self.model.predict(source=source, stream=True, verbose=False, save=False, device=self.device)):
             if index % max(1, frame_skip):
                 continue
             people = people_from_result(result)
             frames.append({"index": index, "person_count": len(people), "people": people})
+            if result.orig_img is not None and len(people) >= best:
+                preview = (result.orig_img.copy(), people)
+                best = len(people)
             if len(frames) >= max_frames:
                 break
-        return frames
+        return frames, preview
