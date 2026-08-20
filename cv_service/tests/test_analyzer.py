@@ -1,5 +1,5 @@
-from app.analyzer import cell_color, crowding_level, majority_pose, occupancy_grid, render_occupancy_overlay, summarize_frames
-from app.detector import classify_keypoints
+from app.analyzer import cell_color, crowding_level, detection_label, majority_pose, occupancy_grid, render_occupancy_overlay, summarize_frames
+from app.detector import box_iou, classify_keypoints, merge_pose_into_detect, people_from_detect
 
 
 def pose(shoulder, hip, knee, ankle):
@@ -41,11 +41,44 @@ def test_occupancy_grid_marks_people_cells():
     assert cell_color(0)[1] > cell_color(2)[1]
 
 
+def test_detection_label_matches_classic_yolo_format():
+    assert detection_label({"label": "person", "confidence": 0.85}) == "person 85%"
+    assert detection_label({"label": "person", "confidence": 0.9}) == "person 90%"
+
+
 def test_occupancy_overlay_encodes_jpeg():
     numpy = __import__("numpy")
     image = numpy.zeros((120, 160, 3), dtype=numpy.uint8)
-    overlay = render_occupancy_overlay(image, [{"center": [20, 20], "state": "STANDING", "box": [5, 5, 40, 70]}])
+    overlay = render_occupancy_overlay(image, [{"label": "person", "confidence": 0.85, "box": [5, 20, 40, 90]}])
     assert overlay and overlay["mime"] == "image/jpeg" and overlay["base64"]
+
+
+class _T:
+    def __init__(self, data):
+        self._data = data
+    def cpu(self):
+        return self
+    def tolist(self):
+        return self._data
+
+
+def test_detect_counts_person_boxes_without_pose():
+    boxes = type("Boxes", (), {})()
+    boxes.xyxy = _T([[10, 10, 40, 80], [50, 10, 90, 80], [5, 5, 20, 20]])
+    boxes.conf = _T([0.91, 0.44, 0.9])
+    boxes.cls = _T([0, 0, 56])
+    result = type("R", (), {"boxes": boxes, "names": {0: "person", 56: "chair"}})()
+    people = people_from_detect(result, min_conf=0.15)
+    assert len(people) == 2
+    assert all(item["label"] == "person" and item["box"] for item in people)
+
+
+def test_merge_keeps_detect_count_and_copies_pose_state():
+    detected = [{"label": "person", "state": "UNKNOWN", "confidence": 0.9, "box": [0, 0, 50, 100]}]
+    posed = [{"label": "person", "state": "SITTING", "confidence": 0.8, "box": [2, 2, 48, 98]}]
+    merged = merge_pose_into_detect(detected, posed)
+    assert len(merged) == 1 and merged[0]["state"] == "SITTING"
+    assert box_iou(detected[0]["box"], posed[0]["box"]) > 0.5
 
 
 def test_explainable_pose_geometry_states():

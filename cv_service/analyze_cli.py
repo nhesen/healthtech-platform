@@ -25,8 +25,8 @@ def main() -> int:
             overlay = render_occupancy_overlay(*preview)
         payload.update({
             "yolo_active": True,
-            "engine": "ultralytics-yolo-pose",
-            "model": os.getenv("CV_MODEL") or os.getenv("YOLO_POSE_MODEL", "yolo11n-pose.pt"),
+            "engine": "ultralytics-yolo",
+            "model": os.getenv("CV_DETECT_MODEL", "yolo11n.pt"),
             "device": os.getenv("CV_DEVICE", "cpu"),
             "identity_recognition": False,
             "frames_discarded": True,

@@ -77,7 +77,7 @@ export default function Safety() {
       {analysis ? <>
         {analysis.overlay_image?.base64 ? <Image accessibilityLabel="YOLO occupancy overlay" source={{ uri: `data:${analysis.overlay_image.mime};base64,${analysis.overlay_image.base64}` }} style={styles.overlay} resizeMode="contain"/> : null}
         <Text style={styles.historyLine}>{analysis.crowding?.level ?? "UNKNOWN"} · peak {analysis.peak_people ?? 0} people</Text>
-        <Text style={styles.footnote}>Yaşıl = boş zona. Qırmızı = dolu zona.</Text>
+        <Text style={styles.footnote}>Qırmızı qutu = aşkarlanan şəxs və ehtimal.</Text>
         <Text style={styles.footnote}>{analysis.crowding?.explanation}</Text>
         <Text style={styles.footnote}>{analysis.movement?.explanation}</Text>
         <Text style={styles.footnote}>{(analysis.movement?.transitions || []).join(", ") || "No pose transition"} · {analysis.engine || "inactive"}</Text>

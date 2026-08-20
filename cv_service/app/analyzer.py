@@ -79,7 +79,7 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
             "peak_people": peak,
             "average_people": average,
             "explanation": (
-                f"YOLO Pose counted a peak of {peak} people in the sampled frames. "
+                f"YOLO counted a peak of {peak} people in the sampled frames. "
                 f"Density is {level.lower().replace('_', ' ')}. This is occupancy decision support, not a diagnosis."
             ),
         },
@@ -97,10 +97,15 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def render_occupancy_overlay(image_bgr: Any, people: list[dict[str, Any]]) -> dict[str, str] | None:
+def detection_label(item: dict[str, Any]) -> str:
+    score = float(item.get("confidence") or 0)
+    name = str(item.get("label") or "person")
+    return f"{name} {int(round(score * 100))}%"
+
+
+def render_occupancy_overlay(image_bgr: Any, people: list[dict[str, Any]], objects: list[dict[str, Any]] | None = None) -> dict[str, str] | None:
     try:
         import cv2
-        import numpy as np
     except ImportError:
         return None
     if image_bgr is None or getattr(image_bgr, "size", 0) == 0:
@@ -108,50 +113,31 @@ def render_occupancy_overlay(image_bgr: Any, people: list[dict[str, Any]]) -> di
     frame = image_bgr.copy()
     height, width = frame.shape[:2]
     max_width = 1280
+    scale = 1.0
     if width > max_width:
         scale = max_width / width
         frame = cv2.resize(frame, (max_width, int(height * scale)))
         height, width = frame.shape[:2]
-        scaled = []
-        for person in people:
-            item = dict(person)
-            if item.get("center"):
-                item["center"] = [item["center"][0] * scale, item["center"][1] * scale]
-            if item.get("box"):
-                item["box"] = [value * scale for value in item["box"]]
-            scaled.append(item)
-        people = scaled
-    overlay = frame.copy()
-    cols, rows = 8, 6
-    cell_w, cell_h = width / cols, height / rows
-    counts = occupancy_grid(width, height, people, cols, rows)
-    for row in range(rows):
-        for col in range(cols):
-            count = counts[row][col]
-            color = cell_color(count)
-            alpha = 0.22 if count == 0 else 0.38 if count == 1 else 0.52
-            x1, y1 = int(col * cell_w), int(row * cell_h)
-            x2, y2 = int((col + 1) * cell_w), int((row + 1) * cell_h)
-            roi = overlay[y1:y2, x1:x2]
-            if roi.size == 0:
-                continue
-            tint = np.full_like(roi, color)
-            overlay[y1:y2, x1:x2] = cv2.addWeighted(roi, 1 - alpha, tint, alpha, 0)
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 1)
-    for person in people:
-        box = person.get("box")
-        if box and len(box) >= 4:
-            x1, y1, x2, y2 = [int(value) for value in box]
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), (40, 40, 220), 2)
-            label = str(person.get("state") or "PERSON")
-            cv2.putText(overlay, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (40, 40, 220), 2, cv2.LINE_AA)
-        elif person.get("center"):
-            cx, cy = int(person["center"][0]), int(person["center"][1])
-            cv2.circle(overlay, (cx, cy), 10, (40, 40, 220), 2)
-    cv2.rectangle(overlay, (8, 8), (268, 78), (0, 0, 0), -1)
-    cv2.putText(overlay, "EMPTY / BOS", (16, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (46, 180, 70), 2, cv2.LINE_AA)
-    cv2.putText(overlay, "OCCUPIED / DOLU", (16, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (40, 40, 220), 2, cv2.LINE_AA)
-    ok, buffer = cv2.imencode(".jpg", overlay, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+
+    def scaled_box(box: list[float]) -> list[int]:
+        return [int(value * scale) for value in box]
+
+    red = (0, 0, 255)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = max(0.55, min(width, height) / 980)
+    thickness = 2
+    detections = list(people) + list(objects or [])
+    for item in detections:
+        box = item.get("box")
+        if not box or len(box) < 4:
+            continue
+        x1, y1, x2, y2 = scaled_box(box)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), red, 2)
+        text = detection_label(item)
+        (_text_w, text_h), _ = cv2.getTextSize(text, font, font_scale, thickness)
+        text_y = y1 - 8 if y1 - text_h - 10 > 0 else y1 + text_h + 8
+        cv2.putText(frame, text, (x1, text_y), font, font_scale, red, thickness, cv2.LINE_AA)
+    ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     if not ok:
         return None
     return {"mime": "image/jpeg", "base64": base64.b64encode(buffer.tobytes()).decode("ascii")}
