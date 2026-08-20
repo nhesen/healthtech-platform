@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { colors } from "@/constants/theme";
 import { getSession } from "@/services/session";
+import type { DemoUser } from "@/types/api";
 
 const icons: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = { index: "home-variant", health: "heart-pulse", doctors: "doctor", appointments: "calendar-clock", profile: "account-circle" };
 export default function TabsLayout() {
-  const [session,setSession]=useState<string|null>(),[ready,setReady]=useState(false);
+  const [session,setSession]=useState<DemoUser|null>(),[ready,setReady]=useState(false);
   useEffect(()=>{void getSession().then(value=>{setSession(value);setReady(true)})},[]);
   if(!ready)return <View style={{flex:1,alignItems:"center",justifyContent:"center",backgroundColor:colors.background}}><ActivityIndicator size="large" color={colors.primary}/></View>;
   if(!session)return <Redirect href="/(auth)/login"/>;
