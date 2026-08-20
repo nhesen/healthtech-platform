@@ -14,6 +14,8 @@ const roles: { value: DemoRole; label: string; hint: string }[] = [
   { value: "DOCTOR", label: "Həkim", hint: "Xəstə qəbulu və konsultasiya" },
   { value: "HOSPITAL_ADMIN", label: "Xəstəxana", hint: "Çarpayı, tapşırıq və təhlükəsizlik" },
 ];
+const DEMO_ACCOUNTS: Record<string, DemoRole> = { "1AZ0001": "PATIENT", "2AZ0002": "DOCTOR", "3AZ0003": "HOSPITAL_ADMIN" };
+function cleanFin(value: string) { return value.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 7); }
 
 export default function Login() {
   const [fin, setFin] = useState("");
@@ -23,12 +25,20 @@ export default function Login() {
 
   useEffect(() => { void getSession().then(value => { if (value) router.replace(ROLE_HOME[value.role]); }); }, []);
 
+  function applyFin(value: string) {
+    const next = cleanFin(value);
+    setFin(next); setError("");
+    const matched = DEMO_ACCOUNTS[next];
+    if (matched) setRole(matched);
+  }
   function choose(value: DemoRole) { setRole(value); setError(""); }
+  function fill(code: string) { applyFin(code); }
 
   async function submit() {
     setLoading(true); setError("");
     try {
-      const user = await login(fin.trim().toUpperCase(), role);
+      const code = cleanFin(fin);
+      const user = await login(code, DEMO_ACCOUNTS[code] ?? role);
       await setSession(user);
       router.replace(ROLE_HOME[user.role]);
     } catch (value) {
@@ -53,11 +63,14 @@ export default function Login() {
           <Text style={styles.label}>FIN</Text>
           <TextInput
             value={fin}
-            onChangeText={value => setFin(value.toUpperCase())}
+            onChangeText={applyFin}
             placeholder="1AZ0001"
             placeholderTextColor={colors.secondary}
             autoCapitalize="characters"
             autoCorrect={false}
+            autoComplete="off"
+            textContentType="none"
+            keyboardType="ascii-capable"
             maxLength={7}
             style={styles.input}
             accessibilityLabel="FIN"
@@ -84,10 +97,13 @@ export default function Login() {
         {!API_URL ? <Text style={styles.hint}>EXPO_PUBLIC_API_URL dəyərini yayımlanmış HTTPS API-yə və ya bu kompüterin LAN ünvanına təyin edin.</Text> : null}
 
         <View style={styles.finBox}>
-          <Text style={styles.finTitle}>DEMO FIN KODLARI</Text>
-          <Text style={styles.finItem}>1AZ0001 · Vətəndaş</Text>
-          <Text style={styles.finItem}>2AZ0002 · Həkim</Text>
-          <Text style={styles.finItem}>3AZ0003 · Xəstəxana</Text>
+          <Text style={styles.finTitle}>DEMO FIN KODLARI · toxunub doldurun</Text>
+          {roles.map(item => {
+            const code = Object.keys(DEMO_ACCOUNTS).find(key => DEMO_ACCOUNTS[key] === item.value) ?? "";
+            return <Pressable key={item.value} onPress={() => fill(code)} style={styles.finRow}>
+              <Text style={styles.finItem}>{code} · {item.label}</Text>
+            </Pressable>;
+          })}
         </View>
       </View>
 
@@ -109,7 +125,7 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 22, fontWeight: "900" },
   body: { color: colors.secondary, lineHeight: 21 },
   label: { color: colors.text, fontSize: 13, fontWeight: "800", marginBottom: spacing.sm },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, fontSize: 18, letterSpacing: 4, color: colors.text, backgroundColor: colors.card },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, fontSize: 18, letterSpacing: 2, color: colors.text, backgroundColor: colors.card, fontVariant: ["tabular-nums"] },
   hint: { color: colors.secondary, fontSize: 12, lineHeight: 17, marginTop: spacing.xs },
   role: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, marginBottom: spacing.sm },
   roleActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
@@ -119,6 +135,7 @@ const styles = StyleSheet.create({
   error: { color: colors.danger, lineHeight: 20 },
   finBox: { backgroundColor: colors.muted, borderRadius: radius.sm, padding: spacing.lg, gap: 3 },
   finTitle: { color: colors.secondary, fontSize: 11, fontWeight: "900", letterSpacing: 1, marginBottom: spacing.xs },
+  finRow: { paddingVertical: 6 },
   finItem: { color: colors.text, fontSize: 13, fontWeight: "700" },
   disclaimer: { color: colors.secondary, textAlign: "center", fontSize: 11, lineHeight: 17 },
 });

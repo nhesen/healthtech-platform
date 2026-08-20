@@ -51,7 +51,7 @@ export async function login(fin: string, role: string): Promise<DemoUser> {
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
     const response = await fetch(`${API_URL}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fin, role }), signal: controller.signal });
-    if (response.status === 401) throw new ApiError(401, "FIN və ya rol yanlışdır.");
+    if (response.status === 401) throw new ApiError(401, "FIN və rol uyğun gəlmir. 1AZ0001 Vətəndaş, 2AZ0002 Həkim, 3AZ0003 Xəstəxanadır.");
     if (response.status === 404) throw new ApiError(404, "Demo girişi bağlıdır.");
     if (response.status === 422) throw new ApiError(422, "FIN 7 simvoldan ibarət olmalıdır.");
     if (response.status === 429) throw new ApiError(429, "Çox sayda cəhd. Bir az sonra yenidən yoxlayın.");
