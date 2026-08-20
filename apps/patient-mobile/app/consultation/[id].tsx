@@ -14,7 +14,7 @@ import { api, patch, post } from "@/services/api";
 import type { Consultation, DoctorAppointment, PatientBrief, TimelineRecord } from "@/types/api";
 
 const STAGES = ["SCHEDULED", "CHECKED_IN", "WAITING", "IN_PROGRESS"];
-const DEMO_NOTES = "Patient reports increased thirst and fatigue over three weeks. Reviewed rising HbA1c trend and current metformin dose.";
+const DEMO_NOTES = "Patient reports fatigue. Reviewed complete blood count change from 02.09.2025 to 10.08.2026 (WBC 10.64 to 7.38, PLT 341 to 234).";
 
 export default function ConsultationRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();

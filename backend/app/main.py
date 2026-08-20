@@ -122,11 +122,13 @@ def notify(conn, *, user_id=None, role=None, hospital_id=None, kind="INFO", mess
 
 def migrate(conn:sqlite3.Connection)->None:
     """Apply idempotent compatibility migrations after the baseline schema."""
+    from .intelligence.schema import INTELLIGENCE_SCHEMA
     if DATABASE_KIND == "postgresql":
         conn.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS hospital_id TEXT")
         conn.execute("ALTER TABLE cv_events ADD COLUMN IF NOT EXISTS hospital_id TEXT NOT NULL DEFAULT 'hospital_caspian'")
         conn.execute("ALTER TABLE checkins ADD COLUMN IF NOT EXISTS created_at TEXT")
         conn.execute("UPDATE users SET profile_json=? WHERE id='user_admin' AND profile_json='{}'",(json.dumps({"hospital_id":"hospital_caspian"}),))
+        conn.executescript(INTELLIGENCE_SCHEMA)
         return
     appointment_sql=(conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='appointments'").fetchone() or [""])[0] or ""
     if "slot_id TEXT NOT NULL UNIQUE" in appointment_sql:
@@ -144,6 +146,7 @@ def migrate(conn:sqlite3.Connection)->None:
     checkin_columns={x[1] for x in conn.execute("PRAGMA table_info(checkins)").fetchall()}
     if "created_at" not in checkin_columns: conn.execute("ALTER TABLE checkins ADD COLUMN created_at TEXT")
     conn.execute("UPDATE users SET profile_json=? WHERE id='user_admin' AND profile_json='{}'",(json.dumps({"hospital_id":"hospital_caspian"}),))
+    conn.executescript(INTELLIGENCE_SCHEMA)
 
 
 def _remove_demo_uploads(paths:list[str])->None:
@@ -244,9 +247,19 @@ def conflicts(conn, patient_id: str, allowed_categories:list[str]|None=None) -> 
     if allergy and json.loads(allergy["allergies_json"]) and any("No known allergies" in (r["raw_text"] or "") for r in records):
         return [{"type":"record_conflict","field":"allergies","severity":"requires_review","message":"Penicillin allergy conflicts with a later 'No known allergies' record.","records":records}]
     return []
+CBC_METRICS={"WBC","RBC","Hemoglobin","HCT","MCV","MCH","MCHC","RDW-CV","PLT","Mentzer","Iron","Ferritin"}
+def featured_trend(trend_data: list[dict]) -> dict|None:
+    ranked=sorted((t for t in trend_data if t.get("previous") is not None),key=lambda t:abs(t.get("change") or 0),reverse=True)
+    return next((t for t in ranked if t["metric"] in CBC_METRICS), ranked[0] if ranked else (trend_data[0] if trend_data else None))
 def specialty_for(trend_data: list[dict]) -> dict:
-    abnormal=[t for t in trend_data if t["metric"] in {"HbA1c","Glucose"} and t["trend"]=="increasing"]
-    return {"suggested_specialty":"Endocrinology","reason":"Recent HbA1c or glucose measurements are increasing. This is a navigation suggestion, not a diagnosis."} if abnormal else {"suggested_specialty":"Internal Medicine","reason":"A general clinical review may be useful."}
+    cbc=[t for t in trend_data if t["metric"] in CBC_METRICS and t.get("previous") is not None and t.get("change")]
+    metabolic=[t for t in trend_data if t["metric"] in {"HbA1c","Glucose"} and t["trend"]=="increasing"]
+    if cbc:
+        changed=", ".join(f"{t['metric']} {t['previous']}→{t['current']}" for t in sorted(cbc,key=lambda x:abs(x["change"]),reverse=True)[:4])
+        return {"suggested_specialty":"Hematology","reason":f"Complete blood count values changed between the two reports ({changed}). This is a navigation suggestion, not a diagnosis."}
+    if metabolic:
+        return {"suggested_specialty":"Endocrinology","reason":"Recent HbA1c or glucose measurements are increasing. This is a navigation suggestion, not a diagnosis."}
+    return {"suggested_specialty":"Internal Medicine","reason":"A general clinical review may be useful."}
 def capacity(conn,hospital_id: str) -> dict:
     states=rows(conn.execute("SELECT status,COUNT(*) count FROM beds WHERE hospital_id=? GROUP BY status",(hospital_id,)).fetchall()); counts={r["status"]:r["count"] for r in states}; expected=conn.execute("SELECT COUNT(*) AS count FROM admissions WHERE hospital_id=? AND status IN ('ACTIVE','READY_FOR_DISCHARGE') AND clinical_ready=1",(hospital_id,)).fetchone()["count"]; blocked=conn.execute("SELECT COUNT(*) AS count FROM discharge_blockers b JOIN admissions a ON a.id=b.admission_id WHERE a.hospital_id=? AND b.status='OPEN'",(hospital_id,)).fetchone()["count"]; h=one(conn,"SELECT emergency_waiting,expected_incoming FROM hospitals WHERE id=?",(hospital_id,))
     return {"total_beds":sum(counts.values()),"occupied":counts.get("OCCUPIED",0),"available":counts.get("AVAILABLE",0),"cleaning":counts.get("CLEANING",0),"expected_discharges":expected,"delayed_discharges":blocked,"emergency_waiting":h["emergency_waiting"],"expected_incoming":h["expected_incoming"]}
@@ -576,8 +589,8 @@ def privacy_history(user:DemoUser=Depends(require("PATIENT"))):
 @app.get("/doctors/patients/{patient_id}/brief")
 def doctor_brief(patient_id:str,user:DemoUser=Depends(require("DOCTOR"))):
     with db() as conn:
-        d,allowed=doctor_patient_access(conn,patient_id,user)
-        p=one(conn,"SELECT p.*,u.name FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,)); data=trends(conn,patient_id) if "LAB_RESULTS" in allowed else []; relevant=[x for x in data if x["metric"] in ("HbA1c","Glucose")] if d["specialty"]=="Endocrinology" else data; records=rows(conn.execute("SELECT * FROM medical_records WHERE patient_id=? AND category IN (%s) ORDER BY record_date DESC" % ",".join("?"*len(allowed)),(patient_id,*allowed)).fetchall()); audit(conn,user.id,"DOCTOR_VIEWED_RECORD","patient",patient_id,{"categories":allowed})
+        _,allowed=doctor_patient_access(conn,patient_id,user)
+        p=one(conn,"SELECT p.*,u.name FROM patients p JOIN users u ON u.id=p.user_id WHERE p.id=?",(patient_id,)); data=trends(conn,patient_id) if "LAB_RESULTS" in allowed else []; relevant=data; records=rows(conn.execute("SELECT * FROM medical_records WHERE patient_id=? AND category IN (%s) ORDER BY record_date DESC" % ",".join("?"*len(allowed)),(patient_id,*allowed)).fetchall()); audit(conn,user.id,"DOCTOR_VIEWED_RECORD","patient",patient_id,{"categories":allowed})
         visible_conflicts=conflicts(conn,patient_id,allowed) if "LAB_RESULTS" in allowed and "DIAGNOSES" in allowed else []; context={"relevant_metrics":relevant,"medications":json.loads(p["medications_json"]) if "MEDICATIONS" in allowed else [],"allergies":json.loads(p["allergies_json"]) if "DIAGNOSES" in allowed else []}; ai=ai_service.generate("patient_brief",context)
         return {**ai.content,"patient":{"id":patient_id,"name":p["name"],"dob":p["dob"]},"reason_for_visit":"Endocrinology consultation","allowed_categories":allowed,"important_history":[r["title"] for r in records],"relevant_metrics":relevant,"medications":context["medications"],"allergies":context["allergies"],"warnings":visible_conflicts,"ai_warnings":ai.content.get("warnings",[]),"ai":ai.model_dump()}
 @app.post("/consultations",status_code=201)
@@ -796,15 +809,16 @@ def audits(user:DemoUser=Depends(require("HOSPITAL_ADMIN"))):
         (a.entity_type='admission' AND EXISTS(SELECT 1 FROM admissions x WHERE x.id=a.entity_id AND x.hospital_id=?)) OR
         (a.entity_type='bed' AND EXISTS(SELECT 1 FROM beds b WHERE b.id=a.entity_id AND b.hospital_id=?)) OR
         (a.entity_type='cv_event' AND EXISTS(SELECT 1 FROM cv_events e WHERE e.id=a.entity_id AND e.hospital_id=?)) OR
-        (a.entity_type='safety_task' AND EXISTS(SELECT 1 FROM safety_tasks s JOIN cv_events e ON e.id=s.event_id WHERE s.id=a.entity_id AND e.hospital_id=?))
+        (a.entity_type='safety_task' AND EXISTS(SELECT 1 FROM safety_tasks s JOIN cv_events e ON e.id=s.event_id WHERE s.id=a.entity_id AND e.hospital_id=?)) OR
+        a.event_type IN ('BREAK_GLASS','MEDICATION_SAFETY_SCAN','HOSPITAL_ROUTE','RESOURCE_MATCH')
         ORDER BY a.created_at DESC"""
         return rows(conn.execute(query,(hospital_id,)*6).fetchall())
 @app.get("/ai/lab-explanation/{patient_id}")
-def ai_explain(patient_id:str,user:DemoUser=Depends(current_user)):
+def ai_explain(patient_id:str,metric:str|None=None,user:DemoUser=Depends(current_user)):
     enforce_rate(f"ai:{user.id}",30,60)
     with db() as conn:
         clinical_access(conn,patient_id,user,("LAB_RESULTS",))
-        data=trends(conn,patient_id); target=next((x for x in data if x["metric"]=="HbA1c"),data[0] if data else None)
+        data=trends(conn,patient_id); target=next((x for x in data if x["metric"]==metric),None) if metric else featured_trend(data)
         if not target: raise HTTPException(404,"No trends available")
         result=ai_service.generate("lab_explanation",{"trend":target}); return {"data":target,"ai":result.model_dump()}
 @app.post("/ai/specialty-recommendation")
@@ -829,3 +843,6 @@ def ai_hospital(payload:AITextIn,user:DemoUser=Depends(require("HOSPITAL_ADMIN")
         if not task: raise HTTPException(404,"Task not found")
         enforce_hospital(conn,user,task["hospital_id"])
         return {"ai":ai_service.generate("hospital_recommendation",{"title":task["title"],"reason":"The patient is discharge-ready and capacity is constrained.","impact":task["impact"]}).model_dump()}
+
+from .intelligence.routes import register as register_intelligence
+register_intelligence(app)

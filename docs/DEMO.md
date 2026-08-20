@@ -24,10 +24,10 @@ $env:DEMO_BACKEND_URL="http://localhost:8000"
 
 ## Known initial state
 
-- Patient: Hasan M., Premium Health, Penicillin allergy, Metformin
+- Patient: Hasan Nurmammadov, Premium Health, Penicillin allergy, Metformin
 - Doctor: Dr. Leyla Mammadova, Endocrinology, `60 AZN`
 - Insurance: `80%` covered, `48 AZN` insurer payment, `12 AZN` patient payment
-- Labs: HbA1c `5.4 -> 5.8 -> 6.3`, Glucose `89 -> 96 -> 108`
+- Labs: two complete blood counts, `02.09.2025` vs `10.08.2026` — WBC `10.64 → 7.38`, PLT `341 → 234`, MCV `75.3 → 76.2`, Hemoglobin `14.3 → 13.9`
 - Booking: no active Hasan appointment, at least one available Dr. Leyla slot
 - Queue after booking: position `4`, three patients ahead, approximately `45 minutes`
 - Hospital: `195 / 200` occupied, five available
@@ -60,9 +60,9 @@ On the phone:
 1. Continue as Hasan.
 2. Open **Health -> Documents -> Upload document**.
 3. Use the bundled synthetic lab report or select its PDF.
-4. Show extracted HbA1c, Glucose, Vitamin D, and Hemoglobin.
+4. Show extracted WBC, Hemoglobin, PLT, and the rest of the complete blood count.
 5. Emphasize that extraction is `NEEDS_REVIEW` until Hasan confirms it.
-6. Confirm the values and open the HbA1c trend.
+6. Confirm the values and open the CBC comparison (`02.09.2025` → `10.08.2026`).
 7. Show the conflicting allergy record and the cautious AI explanation.
 
 Key message: untrusted document text becomes patient-reviewed structured data before entering the clinical timeline.

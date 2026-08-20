@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import type { Href } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { AppButton } from "@/components/AppButton";
@@ -64,6 +65,7 @@ export default function CommandCenter() {
     </Card>
 
     <Card title="Hospital views">
+      <ListRow icon="brain" title="Healthcare intelligence" subtitle="Routing, blood, epidemics, medication safety" onPress={() => router.push("/intelligence" as Href)}/>
       <ListRow icon="office-building-outline" title="Departments" subtitle="Beds per department" onPress={() => router.push("/hospital/departments")}/>
       <ListRow icon="bed-outline" title="Beds" subtitle="Status and occupancy" onPress={() => router.push("/hospital/beds")}/>
       <ListRow icon="swap-horizontal" title="Patient flow" subtitle="Admission stages" onPress={() => router.push("/hospital/flow")}/>

@@ -34,21 +34,21 @@ class MockAIProvider:
     def generate(self, feature: str, context: dict[str, Any]) -> dict[str, Any]:
         if feature == "patient_brief":
             metrics = context.get("relevant_metrics", [])
-            hba = next((x for x in metrics if x.get("metric") == "HbA1c"), None)
-            summary = f"Patient presents for review. HbA1c changed from {hba.get('previous')} to {hba.get('current')}; clinician review is required." if hba else "Patient presents for review. No consented lab trend was supplied to the AI service."
+            changed = max((x for x in metrics if x.get("previous") is not None), key=lambda x: abs((x.get("current") or 0) - (x.get("previous") or 0)), default=None)
+            summary = f"Patient presents for review. {changed.get('metric')} changed from {changed.get('previous')} to {changed.get('current')}; clinician review is required." if changed else "Patient presents for review. No consented lab trend was supplied to the AI service."
             return BriefContent(
                 summary=summary,
-                important_history=[f"HbA1c changed from {hba.get('previous')} to {hba.get('current')}"] if hba else [], relevant_metrics=metrics,
+                important_history=[f"{changed.get('metric')} changed from {changed.get('previous')} to {changed.get('current')}"] if changed else [], relevant_metrics=metrics,
                 medications=context.get("medications", []), allergies=context.get("allergies", []),
                 warnings=["Penicillin allergy recorded in 2024"] if context.get("allergies") else [],
-                suggested_review_points=["Review metabolic trend and current medication details."]
+                suggested_review_points=["Review complete blood count changes and current medication details."]
             ).model_dump()
         if feature == "lab_explanation":
             trend=context["trend"]
             explanation=f"The latest value is {trend['current']}, compared with {trend.get('previous', 'an earlier value')}. This is a measured change, not a diagnosis."
-            if trend["metric"] == "HbA1c":
-                explanation="Your HbA1c has increased over time. " + explanation
-            return {"title":f"{trend['metric']} has {trend['trend']} over time", "explanation":explanation, "suggested_action":"An endocrinology review may be appropriate."}
+            if trend["metric"] in {"WBC","PLT","RBC","Hemoglobin","HCT","MCV","RDW-CV"}:
+                explanation=f"Your {trend['metric']} changed between the 02.09.2025 and 10.08.2026 complete blood counts. " + explanation
+            return {"title":f"{trend['metric']} has {trend['trend']} over time", "explanation":explanation, "suggested_action":"A hematology review may be appropriate."}
         if feature == "specialty":
             return {"specialty":context["specialty"],"reason":context["reason"],"type":"suggested_review"}
         if feature == "consultation_draft":
@@ -62,6 +62,20 @@ class MockAIProvider:
             return {"summary":"Your reported symptoms have worsened over recent check-ins. A clinical review may be appropriate."}
         if feature == "hospital_recommendation":
             return {"title":context["title"],"reason":context["reason"],"expected_impact":context["impact"]}
+        if feature == "medication_explanation":
+            med_a=context.get("medication_a") or "Medication A"; med_b=context.get("medication_b")
+            why=context.get("explanation") or "These medications may interact and increase the risk of an adverse event."
+            return {
+                "title":"Why is this flagged?",
+                "explanation":why if not med_b else f"{med_a} and {med_b} may interact and increase the risk of an adverse event.",
+                "affected_patient":context.get("patient_name"),
+                "action":context.get("recommended_action") or "Clinical review recommended.",
+                "disclaimer":"Decision support only. This is not a diagnosis or a prescription.",
+            }
+        if feature == "routing_explanation":
+            return {"title":"Recommended destination","explanation":"; ".join(context.get("reasons") or []),"disclaimer":"Operator decision support, not an automatic dispatch."}
+        if feature == "epidemic_explanation":
+            return {"title":"Early warning signal","explanation":f"{context.get('region')}: {context.get('signal')} ({context.get('change_percent')}% vs baseline). {context.get('recommendation')}","disclaimer":"Potential outbreak signal. Not a confirmed pandemic."}
         return {"summary":"AI support is available with clinician review."}
 
 class LiveAIProvider:

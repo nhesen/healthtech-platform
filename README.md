@@ -76,6 +76,9 @@ The operational interface is available in the mobile app and in the same Next.js
 - Capacity forecast and recommendations
 - Room 204 patient-safety alerts
 - Nurse task, acknowledgement, resolution, and audit flow
+- Healthcare intelligence: medication safety, break-glass emergency access, ICU routing, blood matching, and epidemiology signals
+
+Decision-support outputs are labeled for clinician review. They are not diagnoses.
 
 ## Main patient journey
 
@@ -148,8 +151,8 @@ The service performs no face recognition, identity recognition, diagnosis, or au
 
 The deterministic demo tells one connected story:
 
-1. Hasan M. uploads a synthetic lab report and confirms extracted values.
-2. HealthTech shows an increasing HbA1c trend and suggests endocrinology review without diagnosing.
+1. Hasan Nurmammadov uploads a lab report and confirms extracted complete blood count values.
+2. HealthTech shows the 02.09.2025 → 10.08.2026 CBC differences and suggests hematology review without diagnosing.
 3. Hasan books Dr. Leyla Mammadova: `60 AZN`, `48 AZN` covered, `12 AZN` patient payment.
 4. Hasan grants time-limited categories; the Doctor panel can then open the relevant brief.
 5. The doctor reviews and approves a consultation note.

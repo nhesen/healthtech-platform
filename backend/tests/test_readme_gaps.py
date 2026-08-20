@@ -33,11 +33,11 @@ def test_insurance_plan_exposes_the_backend_coverage_matrix():
 def test_lab_comparison_returns_a_change_per_metric():
     reset(); c = TestClient(app)
     history = c.get("/patients/patient_hasan/trends", headers=PATIENT).json()["trends"]
-    hba1c = next(x for x in history if x["metric"] == "HbA1c")
-    first, last = hba1c["history"][0]["result_date"], hba1c["history"][-1]["result_date"]
+    wbc = next(x for x in history if x["metric"] == "WBC")
+    first, last = wbc["history"][0]["result_date"], wbc["history"][-1]["result_date"]
     body = c.get("/patients/patient_hasan/lab-comparison", headers=PATIENT, params={"from_date": first, "to_date": last}).json()
-    entry = next(x for x in body["metrics"] if x["metric"] == "HbA1c")
-    assert entry["direction"] == "up" and entry["change"] > 0
+    entry = next(x for x in body["metrics"] if x["metric"] == "WBC")
+    assert entry["direction"] == "down" and entry["change"] == -3.26
     assert body["explanation"]
     assert c.get("/patients/patient_hasan/lab-comparison", headers=PATIENT, params={"from_date": last, "to_date": first}).status_code == 422
 

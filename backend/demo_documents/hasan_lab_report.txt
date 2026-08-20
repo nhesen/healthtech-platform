@@ -1,8 +1,13 @@
-Caspian Medical Center Laboratory
-Report Date: 2026-08-18
-Patient: Hasan Nurmammadov
-
-HbA1c 6.3 % 4.0-5.6
-Glucose 108 mg/dL 70-99
-Vitamin D 28 ng/mL 30-100
-Hemoglobin 14.1 g/dL 13.5-17.5
+Hasan Nurmammadov - Complete Blood Count
+Report date: 2026-08-10
+WBC 7.38 10^3/uL 4.5-11
+RBC 5.74 10^6/uL 4.5-5.9
+Hemoglobin 13.9 g/dL 13.5-17.5
+HCT 43.7 % 40-53
+MCV 76.2 fL 76-100
+MCH 24.2 pg 24-31
+MCHC 31.8 g/dL 30-36
+RDW-CV 14 % 10-16
+PLT 234 10^3/uL 140-400
+Iron 92.9 ug/dL 31-168
+Ferritin 52.4 ng/mL 21.81-274.66

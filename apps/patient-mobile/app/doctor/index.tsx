@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import type { Href } from "expo-router";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "@/components/AppButton";
@@ -45,6 +46,8 @@ export default function DoctorPatients() {
       <Card style={styles.stat}><Text style={styles.label}>Alerts</Text><Text style={[styles.big, unread > 0 && { color: colors.danger }]}>{unread}</Text></Card>
     </View>
     <AppButton label="Advance demo queue" variant="secondary" loading={advancing} onPress={advance}/>
+    <AppButton label="Medication safety" variant="secondary" onPress={() => router.push("/intelligence/medications")}/>
+    <AppButton label="Emergency snapshot" variant="secondary" onPress={() => router.push("/emergency" as Href)}/>
     {notice ? <Text style={styles.notice}>{notice}</Text> : null}
     <Text style={styles.section}>Today</Text>
     {queue.length ? queue.map(item => <Pressable key={item.id} onPress={() => router.push({ pathname: "/consultation/[id]", params: { id: item.id } })} style={({ pressed }) => [styles.card, pressed && { opacity: .7 }]}>

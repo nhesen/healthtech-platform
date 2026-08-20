@@ -85,8 +85,10 @@ def test_queue_lab_comparison_and_consultation_draft_approval():
     first=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slots[0]["id"]}).json()
     second=c.post("/appointments",headers=PATIENT,json={"doctor_id":"doctor_leyla","slot_id":slots[1]["id"]}).json()
     queue=c.get(f"/appointments/{second['id']}/queue",headers=PATIENT).json();assert queue["queue_position"]==5 and queue["estimated_wait_minutes"]==60
-    comparison=c.get("/patients/patient_hasan/lab-comparison?from_date=2024-12-31&to_date=2026-12-31",headers=PATIENT).json()
-    hba=next(x for x in comparison["metrics"] if x["metric"]=="HbA1c");assert hba["change"]==0.9 and hba["direction"]=="up"
+    comparison=c.get("/patients/patient_hasan/lab-comparison?from_date=2025-09-02&to_date=2026-08-10",headers=PATIENT).json()
+    wbc=next(x for x in comparison["metrics"] if x["metric"]=="WBC");assert wbc["change"]==-3.26 and wbc["direction"]=="down"
+    plt=next(x for x in comparison["metrics"] if x["metric"]=="PLT");assert plt["change"]==-107 and plt["direction"]=="down"
+    mcv=next(x for x in comparison["metrics"] if x["metric"]=="MCV");assert mcv["change"]==0.9 and mcv["direction"]=="up"
     consent=c.post("/consents",headers=PATIENT,json={"doctor_id":"doctor_leyla","categories":["DOCTOR_NOTES"],"hours":24});assert consent.status_code==201
     before=len(c.get("/patients/patient_hasan/timeline",headers=PATIENT).json())
     draft=c.post("/consultations",headers=DOCTOR,json={"appointment_id":first["id"],"doctor_notes":"Draft review only","complete":False})

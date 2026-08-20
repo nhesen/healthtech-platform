@@ -54,12 +54,12 @@ def test_document_upload_review_confirm_and_duplicate_protection():
     files={"file":("hasan-labs.pdf",content,"application/pdf")}
     upload=c.post("/documents/upload?patient_id=patient_hasan",headers=PATIENT,files=files)
     assert upload.status_code==201
-    payload=upload.json(); assert payload["status"]=="NEEDS_REVIEW" and len(payload["extraction"]["results"])==4
+    payload=upload.json(); assert payload["status"]=="NEEDS_REVIEW" and {x["test_name"] for x in payload["extraction"]["results"]} >= {"WBC","Hemoglobin","PLT"}
     assert c.post("/documents/upload?patient_id=patient_hasan",headers=PATIENT,files=files).status_code==409
     reviewed={"results":payload["extraction"]["results"],"report_date":"2026-08-19","source_name":"Synthetic demo lab"}
     assert c.patch(f"/documents/{payload['document_id']}/review",headers=PATIENT,json=reviewed).status_code==200
     confirmed=c.post(f"/documents/{payload['document_id']}/confirm",headers=PATIENT,json=reviewed)
-    assert confirmed.status_code==200 and confirmed.json()["results_created"]==4
+    assert confirmed.status_code==200 and confirmed.json()["results_created"]==len(payload["extraction"]["results"])
     assert c.post(f"/documents/{payload['document_id']}/confirm",headers=PATIENT,json=reviewed).status_code==409
     assert any(x["record_id"]==confirmed.json()["record_id"] for x in c.get("/patients/patient_hasan/lab-results",headers=PATIENT).json())
     with db() as conn:

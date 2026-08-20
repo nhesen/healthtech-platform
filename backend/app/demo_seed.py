@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-DEMO_VERSION = 11
+DEMO_VERSION = 13
 HOSPITAL_ID = "hospital_caspian"
 MASTER_PATIENT_ID = "patient_hasan"
 MASTER_DOCTOR_ID = "doctor_leyla"
@@ -72,6 +72,13 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
         DEMO_PATIENT_IDS,
     ).fetchall()]
 
+    for table in (
+        "resource_matches", "resource_requests", "blood_inventory", "epidemic_signals",
+        "symptom_reports", "medication_alerts", "prescriptions", "medication_interactions",
+        "medications", "emergency_access", "hospital_ops",
+    ):
+        conn.execute(f"DELETE FROM {table}")
+
     # Delete only transactions owned by the synthetic demo identities/resources.
     conn.execute(f"DELETE FROM audit_events WHERE actor_id IN (SELECT id FROM users WHERE email IN ({email_marks}))", DEMO_EMAILS)
     conn.execute(f"DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE email IN ({email_marks})) OR id IN ('notification_patient_ready','notification_doctor_demo','notification_admin_capacity') OR related_id IN ('task_104','task_207')", DEMO_EMAILS)
@@ -119,7 +126,7 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
         _upsert(conn, "departments", ("id", "hospital_id", "name"), department)
 
     users = (
-        ("user_patient", "Hasan M.", "patient@demo.az", "PATIENT", "{}"),
+        ("user_patient", "Hasan Nurmammadov", "patient@demo.az", "PATIENT", "{}"),
         ("user_doctor", "Dr. Leyla Mammadova", "doctor@demo.az", "DOCTOR", "{}"),
         ("user_admin", "Aysel Karimova", "admin@demo.az", "HOSPITAL_ADMIN", json.dumps({"hospital_id": HOSPITAL_ID})),
         ("user_doctor_orxan", "Dr. Orxan Aliyev", "doctor_orxan@demo.az", "DOCTOR", "{}"),
@@ -145,13 +152,14 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
         ("PLAN_PREMIUM", "Endocrinology", 80), ("PLAN_PREMIUM", "Cardiology", 80),
         ("PLAN_PREMIUM", "Neurology", 80), ("PLAN_PREMIUM", "Dermatology", 80),
         ("PLAN_PREMIUM", "Internal Medicine", 80), ("PLAN_PREMIUM", "Surgery", 80),
+        ("PLAN_PREMIUM", "Hematology", 80), ("PLAN_PREMIUM", "Rheumatology", 80),
         ("PLAN_PREMIUM", "Blood Tests", 100), ("PLAN_PREMIUM", "MRI", 50),
         ("PLAN_PREMIUM", "Dentistry", 0),
     )
     conn.executemany("INSERT INTO insurance_coverage VALUES(?,?,?)", coverage)
 
     patients = [
-        ("patient_hasan", "user_patient", "2004-04-12", "Male", "+994 50 555 01 01", "A+", "Nigar M., +994 50 555 01 02", "PLAN_PREMIUM", json.dumps([{"name": "Penicillin", "reaction": "rash", "recorded": "2024"}]), json.dumps(["Family history of type 2 diabetes"]), json.dumps([{"name": "Metformin", "dosage": "500 mg"}])),
+        ("patient_hasan", "user_patient", "2008-08-23", "Male", "+994 50 555 01 01", "A+", "Nigar M., +994 50 555 01 02", "PLAN_PREMIUM", json.dumps([{"name": "Penicillin", "reaction": "rash", "recorded": "2024"}]), json.dumps(["Family history of type 2 diabetes"]), json.dumps([{"name": "Metformin", "dosage": "500 mg"}])),
         ("patient_104", "user_104", "1970-01-01", "Other", "", "", "", "PLAN_BASIC", "[]", "[]", "[]"),
         ("patient_207", "user_207", "1972-01-01", "Other", "", "", "", "PLAN_PLUS", "[]", "[]", "[]"),
         ("patient_followup", "user_followup", "1988-06-15", "Female", "", "O+", "", "PLAN_PLUS", "[]", "[]", "[]"),
@@ -175,25 +183,35 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
     historical_records = (
         ("record_general_2024", "patient_hasan", "CHECKUP", "General check-up", "2024-02-22", HOSPITAL_ID, "doctor_samira", "DOCTOR_NOTES", json.dumps({"note": "Routine general check-up completed."}), "", created),
         ("record_allergy_2024", "patient_hasan", "ALLERGY", "Penicillin allergy recorded", "2024-02-22", HOSPITAL_ID, "doctor_samira", "DIAGNOSES", json.dumps({"allergy": "Penicillin", "status": "YES"}), "Penicillin allergy: YES; reaction: rash", created),
-        ("record_visit_2025", "patient_hasan", "DOCTOR_VISIT", "Routine doctor visit", "2025-03-10", HOSPITAL_ID, "doctor_samira", "DOCTOR_NOTES", json.dumps({"note": "Lifestyle review completed."}), "", created),
+        ("record_visit_2025", "patient_hasan", "DOCTOR_VISIT", "Rheumatology lab review", "2025-09-02", HOSPITAL_ID, "doctor_samira", "DOCTOR_NOTES", json.dumps({"note": "Complete blood count from Absheron District Central Hospital reviewed."}), "", created),
         ("record_conflict_2026", "patient_hasan", "IMPORTED_RECORD", "Imported external check-up", "2026-08-01", HOSPITAL_ID, None, "LAB_RESULTS", json.dumps({"allergies": "NONE"}), "No known allergies", created),
-        ("record_navigation_2026", "patient_hasan", "CARE_NAVIGATION", "Endocrinology review suggested", "2026-08-18", HOSPITAL_ID, None, "LAB_RESULTS", json.dumps({"specialty": "Endocrinology", "diagnosis": False}), "Navigation suggestion only; no diagnosis.", created),
+        ("record_navigation_2026", "patient_hasan", "CARE_NAVIGATION", "Hematology review suggested", "2026-08-10", HOSPITAL_ID, None, "LAB_RESULTS", json.dumps({"specialty": "Hematology", "diagnosis": False}), "Navigation suggestion only; no diagnosis.", created),
     )
     conn.executemany("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)", historical_records)
 
+    # Two real CBC reports: Absheron 2025-09-02 vs later hemogram 2026-08-10.
+    # Identifiers from the source PDFs are not stored; only clinical values are seeded.
     metrics = {
-        "HbA1c": (("2024-02-22", 5.4), ("2025-03-10", 5.8), ("2026-08-18", 6.3), "%", "4.0-5.6"),
-        "Glucose": (("2024-02-22", 89), ("2025-03-10", 96), ("2026-08-18", 108), "mg/dL", "70-99"),
-        "Vitamin D": (("2024-02-22", 17), ("2025-03-10", 21), ("2026-08-18", 28), "ng/mL", "30-100"),
-        "Hemoglobin": (("2024-02-22", 14.0), ("2025-03-10", 14.1), ("2026-08-18", 14.1), "g/dL", "13.5-17.5"),
+        "WBC": ((("2025-09-02", 10.64, "3.84-9.84"), ("2026-08-10", 7.38, "4.5-11")), "10^3/μL"),
+        "RBC": ((("2025-09-02", 5.95, "4.03-5.29"), ("2026-08-10", 5.74, "4.5-5.9")), "10^6/μL"),
+        "Hemoglobin": ((("2025-09-02", 14.3, "11.0-14.5"), ("2026-08-10", 13.9, "13.5-17.5")), "g/dL"),
+        "HCT": ((("2025-09-02", 44.8, "33.9-43.5"), ("2026-08-10", 43.7, "40-53")), "%"),
+        "MCV": ((("2025-09-02", 75.3, "76.7-90.0"), ("2026-08-10", 76.2, "76-100")), "fL"),
+        "MCH": ((("2025-09-02", 24.0, "25.2-30.2"), ("2026-08-10", 24.2, "24-31")), "pg"),
+        "MCHC": ((("2025-09-02", 31.9, "31.8-34.8"), ("2026-08-10", 31.8, "30-36")), "g/dL"),
+        "RDW-CV": ((("2025-09-02", 15.1, "12.3-14.6"), ("2026-08-10", 14.0, "10-16")), "%"),
+        "PLT": ((("2025-09-02", 341.0, "175-332"), ("2026-08-10", 234.0, "140-400")), "10^3/μL"),
+        "Mentzer": ((("2025-09-02", 12.66, "<13 carrier / >13 iron-deficiency suspicion"),), "index"),
+        "Iron": ((("2026-08-10", 92.9, "31-168"),), "ug/dL"),
+        "Ferritin": ((("2026-08-10", 52.4, "21.81-274.66"),), "ng/mL"),
     }
-    for metric, values in metrics.items():
-        series, unit, reference = values[:3], values[3], values[4]
-        slug = metric.lower().replace(" ", "_")
-        for year_index, (result_date, value) in enumerate(series, start=2024):
-            record_id = f"record_lab_{slug}_{year_index}"
-            conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)", (record_id, MASTER_PATIENT_ID, "LAB_RESULT", f"{metric} result", result_date, HOSPITAL_ID, None, "LAB_RESULTS", json.dumps({"metric": metric, "value": value, "unit": unit}), None, created))
-            conn.execute("INSERT INTO lab_results VALUES(?,?,?,?,?,?,?,?)", (f"lab_{slug}_{year_index}", MASTER_PATIENT_ID, metric, value, unit, reference, result_date, record_id))
+    for metric, (series, unit) in metrics.items():
+        slug = metric.lower().replace(" ", "_").replace("-", "_")
+        for result_date, value, reference in series:
+            stamp_key = result_date.replace("-", "")
+            record_id = f"record_lab_{slug}_{stamp_key}"
+            conn.execute("INSERT INTO medical_records VALUES(?,?,?,?,?,?,?,?,?,?,?)", (record_id, MASTER_PATIENT_ID, "LAB_RESULT", f"{metric} result", result_date, HOSPITAL_ID, None, "LAB_RESULTS", json.dumps({"metric": metric, "value": value, "unit": unit, "source": "patient_lab_report"}), None, created))
+            conn.execute("INSERT INTO lab_results VALUES(?,?,?,?,?,?,?,?)", (f"lab_{slug}_{stamp_key}", MASTER_PATIENT_ID, metric, value, unit, reference, result_date, record_id))
 
     tomorrow = (stamp + timedelta(days=1)).date()
     def at(hour: int, minute: int = 0) -> datetime:
@@ -255,6 +273,8 @@ def reset_demo_data(conn: sqlite3.Connection) -> list[str]:
     )
     conn.executemany("INSERT INTO notifications VALUES(?,?,?,?,?,?,?,?,?,?)", notifications)
     conn.execute("INSERT INTO demo_seed_versions(key,version,updated_at) VALUES('master',?,?) ON CONFLICT(key) DO UPDATE SET version=excluded.version,updated_at=excluded.updated_at", (DEMO_VERSION, created))
+    from .intelligence.seed import reset_intelligence
+    reset_intelligence(conn)
     return upload_paths
 
 

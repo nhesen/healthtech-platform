@@ -11,11 +11,11 @@ import { PATIENT_ID, api } from "@/services/api";
 import type { AIExplanation, LabComparison, LabResult, TrendsResponse } from "@/types/api";
 
 export default function LabDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>(); const metric = decodeURIComponent(id || "HbA1c");
+  const { id } = useLocalSearchParams<{ id: string }>(); const metric = decodeURIComponent(id || "WBC");
   const state = useApi(async () => {
     const [trends, labs] = await Promise.all([api<TrendsResponse>(`/patients/${PATIENT_ID}/trends`), api<LabResult[]>(`/patients/${PATIENT_ID}/lab-results`)]);
     const trend = trends.trends.find(x => x.metric === metric);
-    const insight = metric === "HbA1c" ? await api<AIExplanation>(`/ai/lab-explanation/${PATIENT_ID}`) : undefined;
+    const insight = await api<AIExplanation>(`/ai/lab-explanation/${PATIENT_ID}?metric=${encodeURIComponent(metric)}`).catch(() => undefined);
     const first = trend?.history[0]?.result_date, last = trend?.history.at(-1)?.result_date;
     const comparison = first && last && first !== last
       ? await api<LabComparison>(`/patients/${PATIENT_ID}/lab-comparison?from_date=${first}&to_date=${last}`).catch(() => undefined)

@@ -44,11 +44,11 @@ def test_eight_step_demo_flow_through_fin_login():
     assert c.get(f"/documents/{document_id}", headers=patient).json()["processing_status"] == "CONFIRMED"
     assert c.post(f"/documents/{document_id}/confirm", headers=patient, json=body).status_code == 409
 
-    # 2. The HbA1c trend increases and endocrinology is suggested without a diagnosis.
+    # 2. The CBC comparison shows change and hematology is suggested without a diagnosis.
     trends = c.get("/patients/patient_hasan/trends", headers=patient).json()
-    hba1c = next(x for x in trends["trends"] if x["metric"] == "HbA1c")
-    assert hba1c["trend"] == "increasing"
-    assert "endocrin" in trends["care_navigation"]["suggested_specialty"].lower()
+    wbc = next(x for x in trends["trends"] if x["metric"] == "WBC")
+    assert wbc["trend"] == "decreasing" and wbc["change"] == -3.26
+    assert "hematolog" in trends["care_navigation"]["suggested_specialty"].lower()
 
     # 3. Booking Dr. Leyla costs 60 AZN, of which insurance covers 48 AZN.
     estimate = c.get("/insurance/estimate", headers=patient, params={"patient_id": "patient_hasan", "doctor_id": "doctor_leyla"}).json()

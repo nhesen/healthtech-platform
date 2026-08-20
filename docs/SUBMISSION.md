@@ -32,7 +32,7 @@ It focuses on integration and action rather than claiming to replace clinical sy
 
 ## Demonstrated journey
 
-Synthetic lab report -> reviewed values -> longitudinal trend -> AI explanation -> endocrinology suggestion -> insurance estimate -> appointment -> consent -> Doctor brief -> consultation -> hospital task -> bed release -> Room 204 safety response.
+Synthetic lab report -> reviewed CBC values -> 2025 vs 2026 comparison -> AI explanation -> hematology suggestion -> insurance estimate -> appointment -> consent -> Doctor brief -> consultation -> hospital task -> bed release -> Room 204 safety response.
 
 ## Safety and ethics
 

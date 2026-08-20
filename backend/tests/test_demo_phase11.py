@@ -36,7 +36,7 @@ def assert_initial_state(client: TestClient) -> None:
     assert all(readiness.json()["checks"].values())
 
     profile = client.get("/patients/patient_hasan", headers=PATIENT).json()
-    assert profile["name"] == "Hasan M."
+    assert profile["name"] == "Hasan Nurmammadov"
     assert profile["insurance_plan"] == "PLAN_PREMIUM"
     doctors = client.get("/doctors", headers=PATIENT).json()
     assert len(doctors) == 8
@@ -55,14 +55,17 @@ def assert_initial_state(client: TestClient) -> None:
 
     trends = client.get("/patients/patient_hasan/trends", headers=PATIENT).json()
     expected = {
-        "HbA1c": [5.4, 5.8, 6.3],
-        "Glucose": [89, 96, 108],
-        "Vitamin D": [17, 21, 28],
-        "Hemoglobin": [14.0, 14.1, 14.1],
+        "WBC": [10.64, 7.38],
+        "RBC": [5.95, 5.74],
+        "Hemoglobin": [14.3, 13.9],
+        "HCT": [44.8, 43.7],
+        "MCV": [75.3, 76.2],
+        "PLT": [341.0, 234.0],
     }
     for metric, values in expected.items():
         row = next(item for item in trends["trends"] if item["metric"] == metric)
         assert [point["value"] for point in row["history"]] == values
+    assert trends["care_navigation"]["suggested_specialty"] == "Hematology"
     assert trends["conflicts"]
 
     capacity = client.get("/hospitals/hospital_caspian/capacity", headers=ADMIN).json()
@@ -102,7 +105,10 @@ def run_complete_demo(client: TestClient) -> None:
     )
     assert uploaded.status_code == 201
     document = uploaded.json()
-    assert [item["value"] for item in document["extraction"]["results"]] == [6.3, 108.0, 28.0, 14.1]
+    extracted = {item["test_name"]: item["value"] for item in document["extraction"]["results"]}
+    assert extracted["WBC"] == 7.38
+    assert extracted["Hemoglobin"] == 13.9
+    assert extracted["PLT"] == 234
     review = {
         "results": document["extraction"]["results"],
         "report_date": document["extraction"]["report_date"],

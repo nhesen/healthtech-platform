@@ -15,8 +15,9 @@ def reset():
 def test_trend_conflict_and_insurance():
     reset(); c=TestClient(app)
     patient={"X-Demo-User":"patient@demo.az"}; data=c.get("/patients/patient_hasan/trends",headers=patient).json()
-    hba=next(x for x in data["trends"] if x["metric"]=="HbA1c")
-    assert hba["change"]==0.5 and hba["trend"]=="increasing" and data["conflicts"]
+    wbc=next(x for x in data["trends"] if x["metric"]=="WBC")
+    assert wbc["change"]==-3.26 and wbc["trend"]=="decreasing" and data["conflicts"]
+    assert data["care_navigation"]["suggested_specialty"]=="Hematology"
     estimate=c.get("/insurance/estimate",headers=patient,params={"patient_id":"patient_hasan","doctor_id":"doctor_leyla"}).json()
     assert estimate["patient_payment"]==12.0
 

@@ -2,21 +2,35 @@
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
 3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >> endobj
-4 0 obj << /Length 253 >> stream
+4 0 obj << /Length 516 >> stream
 BT
-/F1 16 Tf
+/F1 12 Tf
 72 750 Td
-(Hasan M. - Synthetic Lab Report) Tj
-0 -28 Td
-(Report date: 2026-08-18) Tj
-0 -28 Td
-(HbA1c 6.3 % 4.0-5.6) Tj
-0 -28 Td
-(Glucose 108 mg/dL 70-99) Tj
-0 -28 Td
-(Vitamin D 28 ng/mL 30-100) Tj
-0 -28 Td
-(Hemoglobin 14.1 g/dL 12-16) Tj
+(Hasan Nurmammadov - Complete Blood Count) Tj
+0 -22 Td
+(Report date: 2026-08-10) Tj
+0 -22 Td
+(WBC 7.38 10^3/uL 4.5-11) Tj
+0 -22 Td
+(RBC 5.74 10^6/uL 4.5-5.9) Tj
+0 -22 Td
+(Hemoglobin 13.9 g/dL 13.5-17.5) Tj
+0 -22 Td
+(HCT 43.7 % 40-53) Tj
+0 -22 Td
+(MCV 76.2 fL 76-100) Tj
+0 -22 Td
+(MCH 24.2 pg 24-31) Tj
+0 -22 Td
+(MCHC 31.8 g/dL 30-36) Tj
+0 -22 Td
+(RDW-CV 14 % 10-16) Tj
+0 -22 Td
+(PLT 234 10^3/uL 140-400) Tj
+0 -22 Td
+(Iron 92.9 ug/dL 31-168) Tj
+0 -22 Td
+(Ferritin 52.4 ng/mL 21.81-274.66) Tj
 ET
 endstream endobj
 5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
@@ -27,8 +41,8 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000241 00000 n 
-0000000545 00000 n 
+0000000808 00000 n 
 trailer << /Size 6 /Root 1 0 R >>
 startxref
-615
+878
 %%EOF
